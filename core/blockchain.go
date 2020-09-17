@@ -1420,7 +1420,7 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 	defer bc.wg.Done()
 
 	current := bc.CurrentBlock()
-	if block.ParentHash() != current.Hash() {
+	if !bc.manualCanonical && block.ParentHash() != current.Hash() {
 		if err := bc.reorg(current, block); err != nil {
 			return err
 		}
@@ -2051,6 +2051,7 @@ func (bc *BlockChain) insertSideChain(block *types.Block, it *insertIterator) (i
 // blocks and inserts them to be part of the new canonical chain and accumulates
 // potential missing transactions and post an event about them.
 func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
+	log.Error("reorg shouldn't happen!!!")
 	var (
 		newChain    types.Blocks
 		oldChain    types.Blocks
@@ -2492,12 +2493,13 @@ func (bc *BlockChain) SubscribeBlockProcessingEvent(ch chan<- bool) event.Subscr
 }
 
 func (bc *BlockChain) ManualHead(hash common.Hash) error {
-	block := bc.GetBlockByHash(hash)
-	if block == nil {
-		return errors.New("block not found")
-	}
-	bc.chainmu.Lock()
-	defer bc.chainmu.Unlock()
-	bc.writeHeadBlock(block)
-	return nil
+	return bc.FastSyncCommitHead(hash)
+	//block := bc.GetBlockByHash(hash)
+	//if block == nil {
+	//	return errors.New("block not found")
+	//}
+	//bc.chainmu.Lock()
+	//defer bc.chainmu.Unlock()
+	//bc.writeHeadBlock(block)
+	//return nil
 }
