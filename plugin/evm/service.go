@@ -21,6 +21,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/tenderly/coreth/params"
 )
 
 // test constants
@@ -36,6 +37,8 @@ var (
 	errNoAddresses   = errors.New("no addresses provided")
 	errNoSourceChain = errors.New("no source chain provided")
 	errNilTxID       = errors.New("nil transaction ID")
+
+	initialBaseFee = big.NewInt(params.ApricotPhase3InitialBaseFee)
 )
 
 // SnowmanAPI introduces snowman specific functionality to the evm
@@ -51,7 +54,7 @@ type NetAPI struct{ vm *VM }
 func (s *NetAPI) Listening() bool { return true } // always listening
 
 // PeerCount returns the number of connected peers
-func (s *NetAPI) PeerCount() hexutil.Uint { return hexutil.Uint(0) } // TODO: report number of connected peers
+func (s *NetAPI) PeerCount() hexutil.Uint { return hexutil.Uint(0) }
 
 // Version returns the current ethereum protocol version.
 func (s *NetAPI) Version() string { return fmt.Sprintf("%d", s.vm.networkID) }
@@ -100,6 +103,16 @@ func (service *AvaxAPI) parseAssetID(assetID string) (ids.ID, error) {
 	}
 }
 
+type VersionReply struct {
+	Version string `json:"version"`
+}
+
+// ClientVersion returns the version of the VM running
+func (service *AvaxAPI) Version(r *http.Request, args *struct{}, reply *VersionReply) error {
+	reply.Version = Version
+	return nil
+}
+
 // ExportKeyArgs are arguments for ExportKey
 type ExportKeyArgs struct {
 	api.UserPass
@@ -136,7 +149,7 @@ func (service *AvaxAPI) ExportKey(r *http.Request, args *ExportKeyArgs, reply *E
 	if err != nil {
 		return fmt.Errorf("problem retrieving private key: %w", err)
 	}
-	encodedKey, err := formatting.Encode(formatting.CB58, sk.Bytes())
+	encodedKey, err := formatting.EncodeWithChecksum(formatting.CB58, sk.Bytes())
 	if err != nil {
 		return fmt.Errorf("problem encoding bytes as cb58: %w", err)
 	}
@@ -197,6 +210,9 @@ func (service *AvaxAPI) ImportKey(r *http.Request, args *ImportKeyArgs, reply *a
 type ImportArgs struct {
 	api.UserPass
 
+	// Fee that should be used when creating the tx
+	BaseFee *hexutil.Big `json:"baseFee"`
+
 	// Chain the funds are coming from
 	SourceChain string `json:"sourceChain"`
 
@@ -240,7 +256,18 @@ func (service *AvaxAPI) Import(_ *http.Request, args *ImportArgs, response *api.
 		return fmt.Errorf("couldn't get keys controlled by the user: %w", err)
 	}
 
-	tx, err := service.vm.newImportTx(chainID, to, privKeys)
+	var baseFee *big.Int
+	if args.BaseFee == nil {
+		// Get the base fee to use
+		baseFee, err = service.vm.estimateBaseFee(context.Background())
+		if err != nil {
+			return err
+		}
+	} else {
+		baseFee = args.BaseFee.ToInt()
+	}
+
+	tx, err := service.vm.newImportTx(chainID, to, baseFee, privKeys)
 	if err != nil {
 		return err
 	}
@@ -252,6 +279,9 @@ func (service *AvaxAPI) Import(_ *http.Request, args *ImportArgs, response *api.
 // ExportAVAXArgs are the arguments to ExportAVAX
 type ExportAVAXArgs struct {
 	api.UserPass
+
+	// Fee that should be used when creating the tx
+	BaseFee *hexutil.Big `json:"baseFee"`
 
 	// Amount of asset to send
 	Amount json.Uint64 `json:"amount"`
@@ -312,13 +342,25 @@ func (service *AvaxAPI) Export(_ *http.Request, args *ExportArgs, response *api.
 		return fmt.Errorf("couldn't get addresses controlled by the user: %w", err)
 	}
 
+	var baseFee *big.Int
+	if args.BaseFee == nil {
+		// Get the base fee to use
+		baseFee, err = service.vm.estimateBaseFee(context.Background())
+		if err != nil {
+			return err
+		}
+	} else {
+		baseFee = args.BaseFee.ToInt()
+	}
+
 	// Create the transaction
 	tx, err := service.vm.newExportTx(
 		assetID,             // AssetID
 		uint64(args.Amount), // Amount
 		chainID,             // ID of the chain to send the funds to
 		to,                  // Address
-		privKeys,            // Private keys
+		baseFee,
+		privKeys, // Private keys
 	)
 	if err != nil {
 		return fmt.Errorf("couldn't create tx: %w", err)
@@ -388,7 +430,7 @@ func (service *AvaxAPI) GetUTXOs(r *http.Request, args *api.GetUTXOsArgs, reply 
 		if err != nil {
 			return fmt.Errorf("problem marshalling UTXO: %w", err)
 		}
-		str, err := formatting.Encode(args.Encoding, b)
+		str, err := formatting.EncodeWithChecksum(args.Encoding, b)
 		if err != nil {
 			return fmt.Errorf("problem encoding utxo: %w", err)
 		}
@@ -422,22 +464,6 @@ func (service *AvaxAPI) IssueTx(r *http.Request, args *api.FormattedTx, response
 	}
 	if err := tx.Sign(service.vm.codec, nil); err != nil {
 		return fmt.Errorf("problem initializing transaction: %w", err)
-	}
-
-	blockIntf := service.vm.LastAcceptedBlockInternal()
-	block, ok := blockIntf.(*Block)
-	if !ok {
-		return fmt.Errorf("last accepted block %s had unexpected type %T", blockIntf.ID(), blockIntf)
-	}
-	if err := tx.UnsignedAtomicTx.SemanticVerify(service.vm, tx, block, service.vm.currentRules()); err != nil {
-		return err
-	}
-	state, err := service.vm.chain.CurrentState()
-	if err != nil {
-		return fmt.Errorf("problem retrieving current state: %w", err)
-	}
-	if err := tx.UnsignedAtomicTx.EVMStateTransfer(service.vm, state); err != nil {
-		return err
 	}
 
 	response.TxID = tx.ID()
@@ -490,7 +516,7 @@ func (service *AvaxAPI) GetAtomicTx(r *http.Request, args *api.GetTxArgs, reply 
 		return fmt.Errorf("could not find tx %s", args.TxID)
 	}
 
-	txBytes, err := formatting.Encode(args.Encoding, tx.Bytes())
+	txBytes, err := formatting.EncodeWithChecksum(args.Encoding, tx.Bytes())
 	if err != nil {
 		return err
 	}

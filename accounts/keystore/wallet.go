@@ -29,10 +29,11 @@ package keystore
 import (
 	"math/big"
 
+	"github.com/tenderly/coreth/interfaces"
+
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/tenderly/coreth/accounts"
 	"github.com/tenderly/coreth/core/types"
-	"github.com/tenderly/coreth/interfaces"
 )
 
 // keystoreWallet implements the accounts.Wallet interface for the original

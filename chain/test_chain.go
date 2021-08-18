@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/tenderly/coreth/accounts/keystore"
+	"github.com/tenderly/coreth/consensus/dummy"
 	"github.com/tenderly/coreth/core"
 	"github.com/tenderly/coreth/core/rawdb"
 	"github.com/tenderly/coreth/core/types"
@@ -23,11 +24,11 @@ import (
 var (
 	basicTxGasLimit       = 21000
 	fundedKey, bob, alice *keystore.Key
-	initialBalance        = big.NewInt(100000000000000000)
+	initialBalance        = big.NewInt(1000000000000000000)
 	chainID               = big.NewInt(1)
 	value                 = big.NewInt(1000000000000)
-	gasLimit              = 10000000
-	gasPrice              = big.NewInt(1000000000)
+	gasLimit              = 1000000
+	gasPrice              = big.NewInt(params.LaunchMinGasPrice)
 )
 
 func init() {
@@ -76,26 +77,48 @@ func NewDefaultChain(t *testing.T) (*ETHChain, chan core.NewTxPoolHeadEvent, <-c
 		Alloc:      core.GenesisAlloc{fundedKey.Address: {Balance: initialBalance}},
 	}
 
-	chain, err := NewETHChain(&config, &node.Config{}, rawdb.NewMemoryDatabase(), eth.DefaultSettings, common.Hash{})
+	var (
+		chain *ETHChain
+		err   error
+	)
+	chain, err = NewETHChain(
+		&config,
+		&node.Config{},
+		rawdb.NewMemoryDatabase(),
+		eth.DefaultSettings,
+		new(dummy.ConsensusCallbacks),
+		common.Hash{},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	chain.SetOnSealFinish(func(block *types.Block) {
-		if err := chain.InsertBlock(block); err != nil {
-			t.Fatal(err)
-		}
-		if err := chain.SetPreference(block); err != nil {
-			t.Fatal(err)
-		}
-		if err := chain.Accept(block); err != nil {
-			t.Fatal(err)
-		}
-	})
 
 	newTxPoolHeadChan := make(chan core.NewTxPoolHeadEvent, 1)
 	chain.GetTxPool().SubscribeNewHeadEvent(newTxPoolHeadChan)
 
 	txSubmitCh := chain.GetTxSubmitCh()
 	return chain, newTxPoolHeadChan, txSubmitCh
+}
+
+// insertAndAccept inserts [block] into [chain], sets the chains preference to it
+// and then Accepts it.
+func insertAndAccept(t *testing.T, chain *ETHChain, block *types.Block) {
+	if err := chain.InsertBlock(block); err != nil {
+		t.Fatal(err)
+	}
+	if err := chain.SetPreference(block); err != nil {
+		t.Fatal(err)
+	}
+	if err := chain.Accept(block); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertAndSetPreference(t *testing.T, chain *ETHChain, block *types.Block) {
+	if err := chain.InsertBlock(block); err != nil {
+		t.Fatal(err)
+	}
+	if err := chain.SetPreference(block); err != nil {
+		t.Fatal(err)
+	}
 }

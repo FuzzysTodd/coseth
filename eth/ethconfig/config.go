@@ -27,26 +27,17 @@
 package ethconfig
 
 import (
-	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/tenderly/coreth/core"
 	"github.com/tenderly/coreth/eth/gasprice"
 	"github.com/tenderly/coreth/miner"
-	"github.com/tenderly/coreth/params"
 )
 
 // DefaultFullGPOConfig contains default gasprice oracle settings for full node.
 var DefaultFullGPOConfig = gasprice.Config{
 	Blocks:     20,
-	Percentile: 60,
-	MaxPrice:   gasprice.DefaultMaxPrice,
-}
-
-// DefaultLightGPOConfig contains default gasprice oracle settings for light client.
-var DefaultLightGPOConfig = gasprice.Config{
-	Blocks:     2,
 	Percentile: 60,
 	MaxPrice:   gasprice.DefaultMaxPrice,
 }
@@ -65,17 +56,12 @@ func NewDefaultConfig() Config {
 		TrieCleanCacheRejournal: 60 * time.Minute,
 		TrieDirtyCache:          256,
 		TrieTimeout:             60 * time.Minute,
-		SnapshotCache:           0,
-		Miner: miner.Config{
-			GasFloor:              8000000,
-			GasCeil:               8000000,
-			ApricotPhase1GasLimit: params.ApricotPhase1GasLimit,
-			GasPrice:              big.NewInt(params.GWei),
-		},
-		TxPool:      core.DefaultTxPoolConfig,
-		RPCGasCap:   25000000,
-		GPO:         DefaultFullGPOConfig,
-		RPCTxFeeCap: 1, // 1 ether
+		SnapshotCache:           128,
+		Miner:                   miner.Config{},
+		TxPool:                  core.DefaultTxPoolConfig,
+		RPCGasCap:               25000000,
+		GPO:                     DefaultFullGPOConfig,
+		RPCTxFeeCap:             1, // 1 AVAX
 	}
 }
 
@@ -93,7 +79,9 @@ type Config struct {
 	// for nodes to connect to.
 	DiscoveryURLs []string
 
-	Pruning bool // Whether to disable pruning and flush everything to disk
+	Pruning        bool // Whether to disable pruning and flush everything to disk
+	SnapshotAsync  bool // Whether to generate the initial snapshot in async mode
+	SnapshotVerify bool // Whether to verify generated snapshots
 
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
@@ -138,12 +126,6 @@ type Config struct {
 
 	// Miscellaneous options
 	DocRoot string `toml:"-"`
-
-	// Type of the EWASM interpreter ("" for default)
-	EWASMInterpreter string
-
-	// Type of the EVM interpreter ("" for default)
-	EVMInterpreter string
 
 	// RPCGasCap is the global gas cap for eth-call variants.
 	RPCGasCap uint64 `toml:",omitempty"`

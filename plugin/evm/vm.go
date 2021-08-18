@@ -4,6 +4,7 @@
 package evm
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -14,7 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ava-labs/avalanchego/database/versiondb"
 	coreth "github.com/tenderly/coreth/chain"
+	"github.com/tenderly/coreth/consensus/dummy"
 	"github.com/tenderly/coreth/core"
 	"github.com/tenderly/coreth/core/state"
 	"github.com/tenderly/coreth/core/types"
@@ -25,9 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/rpc"
-
-	ethcrypto "github.com/ethereum/go-ethereum/crypto"
+	"github.com/tenderly/coreth/rpc"
 
 	avalancheRPC "github.com/gorilla/rpc/v2"
 
@@ -37,7 +38,6 @@ import (
 	"github.com/ava-labs/avalanchego/database"
 	"github.com/ava-labs/avalanchego/database/manager"
 	"github.com/ava-labs/avalanchego/database/prefixdb"
-	"github.com/ava-labs/avalanchego/database/versionabledb"
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/snow"
 	"github.com/ava-labs/avalanchego/snow/choices"
@@ -47,9 +47,9 @@ import (
 	"github.com/ava-labs/avalanchego/utils/crypto"
 	"github.com/ava-labs/avalanchego/utils/formatting"
 	"github.com/ava-labs/avalanchego/utils/logging"
+	"github.com/ava-labs/avalanchego/utils/math"
 	"github.com/ava-labs/avalanchego/utils/profiler"
 	"github.com/ava-labs/avalanchego/utils/timer"
-	"github.com/ava-labs/avalanchego/utils/units"
 	"github.com/ava-labs/avalanchego/utils/wrappers"
 	"github.com/ava-labs/avalanchego/vms/components/avax"
 	"github.com/ava-labs/avalanchego/vms/components/chain"
@@ -59,16 +59,23 @@ import (
 	avalancheJSON "github.com/ava-labs/avalanchego/utils/json"
 )
 
+const (
+	x2cRateInt64       int64 = 1000000000
+	x2cRateMinus1Int64 int64 = x2cRateInt64 - 1
+)
+
 var (
 	// x2cRate is the conversion rate between the smallest denomination on the X-Chain
 	// 1 nAVAX and the smallest denomination on the C-Chain 1 wei. Where 1 nAVAX = 1 gWei.
 	// This is only required for AVAX because the denomination of 1 AVAX is 9 decimal
 	// places on the X and P chains, but is 18 decimal places within the EVM.
-	x2cRate = big.NewInt(1000000000)
+	x2cRate       = big.NewInt(x2cRateInt64)
+	x2cRateMinus1 = big.NewInt(x2cRateMinus1Int64)
+
 	// GitCommit is set by the build script
 	GitCommit string
 	// Version is the version of Coreth
-	Version = "coreth-v0.5.4"
+	Version string
 
 	_ block.ChainVM = &VM{}
 )
@@ -83,7 +90,6 @@ const (
 	maxUTXOsToFetch      = 1024
 	defaultMempoolSize   = 1024
 	codecVersion         = uint16(0)
-	txFee                = units.MilliAvax
 	secpFactoryCacheSize = 1024
 
 	decidedCacheSize    = 100
@@ -110,7 +116,6 @@ var (
 	errNoImportInputs             = errors.New("tx has no imported inputs")
 	errInputsNotSortedUnique      = errors.New("inputs not sorted and unique")
 	errPublicKeySignatureMismatch = errors.New("signature doesn't match public key")
-	errSignatureInputsMismatch    = errors.New("number of inputs does not match number of signatures")
 	errWrongChainID               = errors.New("tx has wrong chain ID")
 	errInsufficientFunds          = errors.New("insufficient funds")
 	errNoExportOutputs            = errors.New("tx has no export outputs")
@@ -130,6 +135,7 @@ var (
 	errHeaderExtraDataTooBig      = errors.New("header extra data too big")
 	errInsufficientFundsForFee    = errors.New("insufficient AVAX funds to pay transaction fee")
 	errNoEVMOutputs               = errors.New("tx has no EVM outputs")
+	errNilBaseFeeApricotPhase3    = errors.New("nil base fee is invalid in apricotPhase3")
 )
 
 // buildingBlkStatus denotes the current status of the VM in block production.
@@ -190,7 +196,7 @@ type VM struct {
 	chain       *coreth.ETHChain
 	chainConfig *params.ChainConfig
 	// [db] is the VM's current database managed by ChainState
-	db *versionabledb.Database
+	db *versiondb.Database
 	// [chaindb] is the database supplied to the Ethereum backend
 	chaindb Database
 	// [acceptedBlockDB] is the database to store the last accepted
@@ -219,7 +225,6 @@ type VM struct {
 	baseCodec codec.Registry
 	codec     codec.Manager
 	clock     timer.Clock
-	txFee     uint64
 	mempool   *Mempool
 
 	shutdownChan chan struct{}
@@ -268,12 +273,17 @@ func (vm *VM) Initialize(
 	toEngine chan<- commonEng.Message,
 	fxs []*commonEng.Fx,
 ) error {
-	log.Info("Initializing Coreth VM", "Version", Version)
 	vm.config.SetDefaults()
 	if len(configBytes) > 0 {
 		if err := json.Unmarshal(configBytes, &vm.config); err != nil {
 			return fmt.Errorf("failed to unmarshal config %s: %w", string(configBytes), err)
 		}
+	}
+	if b, err := json.Marshal(vm.config); err == nil {
+		log.Info("Initializing Coreth VM", "Version", Version, "Config", string(b))
+	} else {
+		// Log a warning message since we have already successfully unmarshalled into the struct
+		log.Warn("Problem initializing Coreth VM", "Version", Version, "Config", string(b), "err", err)
 	}
 
 	if len(fxs) > 0 {
@@ -282,8 +292,11 @@ func (vm *VM) Initialize(
 
 	vm.shutdownChan = make(chan struct{}, 1)
 	vm.ctx = ctx
-	vm.db = versionabledb.New(dbManager.Current().Database)
-	vm.chaindb = Database{prefixdb.New(ethDBPrefix, vm.db)}
+	baseDB := dbManager.Current().Database
+	// Use NewNested rather than New so that the structure of the database
+	// remains the same regardless of the provided baseDB type.
+	vm.chaindb = Database{prefixdb.NewNested(ethDBPrefix, baseDB)}
+	vm.db = versiondb.New(baseDB)
 	vm.acceptedBlockDB = prefixdb.New(acceptedPrefix, vm.db)
 	vm.acceptedAtomicTxDB = prefixdb.New(atomicTxPrefix, vm.db)
 	g := new(core.Genesis)
@@ -291,7 +304,7 @@ func (vm *VM) Initialize(
 		return err
 	}
 
-	// Set the ApricotPhase1BlockTimestamp for mainnet/fuji
+	// Set the chain config for mainnet/fuji chain IDs
 	switch {
 	case g.Config.ChainID.Cmp(params.AvalancheMainnetChainID) == 0:
 		g.Config = params.AvalancheMainnetChainConfig
@@ -299,6 +312,8 @@ func (vm *VM) Initialize(
 	case g.Config.ChainID.Cmp(params.AvalancheFujiChainID) == 0:
 		g.Config = params.AvalancheFujiChainConfig
 		phase0BlockValidator.extDataHashes = fujiExtDataHashes
+	case g.Config.ChainID.Cmp(params.AvalancheLocalChainID) == 0:
+		g.Config = params.AvalancheLocalChainConfig
 	}
 
 	// Allow ExtDataHashes to be garbage collected as soon as freed from block
@@ -307,37 +322,9 @@ func (vm *VM) Initialize(
 	mainnetExtDataHashes = nil
 
 	vm.chainID = g.Config.ChainID
-	vm.txFee = txFee
 
 	ethConfig := ethconfig.NewDefaultConfig()
 	ethConfig.Genesis = g
-
-	// Set minimum gas price and launch goroutine to sleep until
-	// network upgrade when the gas price must be changed
-	var gasPriceUpdate func() // must call after coreth.NewETHChain to avoid race
-	if g.Config.ApricotPhase1BlockTimestamp == nil {
-		ethConfig.Miner.GasPrice = params.LaunchMinGasPrice
-		ethConfig.GPO.Default = params.LaunchMinGasPrice
-		ethConfig.TxPool.PriceLimit = params.LaunchMinGasPrice.Uint64()
-	} else {
-		apricotTime := time.Unix(g.Config.ApricotPhase1BlockTimestamp.Int64(), 0)
-		log.Info(fmt.Sprintf("Apricot Upgrade Time %v.", apricotTime))
-		if time.Now().Before(apricotTime) {
-			untilApricot := time.Until(apricotTime)
-			log.Info(fmt.Sprintf("Upgrade will occur in %v", untilApricot))
-			ethConfig.Miner.GasPrice = params.LaunchMinGasPrice
-			ethConfig.GPO.Default = params.LaunchMinGasPrice
-			ethConfig.TxPool.PriceLimit = params.LaunchMinGasPrice.Uint64()
-			gasPriceUpdate = func() {
-				time.Sleep(untilApricot)
-				vm.chain.SetGasPrice(params.ApricotPhase1MinGasPrice)
-			}
-		} else {
-			ethConfig.Miner.GasPrice = params.ApricotPhase1MinGasPrice
-			ethConfig.GPO.Default = params.ApricotPhase1MinGasPrice
-			ethConfig.TxPool.PriceLimit = params.ApricotPhase1MinGasPrice.Uint64()
-		}
-	}
 
 	// Set minimum price for mining and default gas price oracle value to the min
 	// gas price to prevent so transactions and blocks all use the correct fees
@@ -346,6 +333,9 @@ func (vm *VM) Initialize(
 	ethConfig.TxPool.NoLocals = !vm.config.LocalTxsEnabled
 	ethConfig.AllowUnfinalizedQueries = vm.config.AllowUnfinalizedQueries
 	ethConfig.Pruning = vm.config.Pruning
+	ethConfig.SnapshotAsync = vm.config.SnapshotAsync
+	ethConfig.SnapshotVerify = vm.config.SnapshotVerify
+
 	vm.chainConfig = g.Config
 	vm.networkID = ethConfig.NetworkId
 	vm.secpFactory = crypto.FactorySECP256K1R{Cache: cache.LRU{Size: secpFactoryCacheSize}}
@@ -357,13 +347,18 @@ func (vm *VM) Initialize(
 		InsecureUnlockAllowed: vm.config.KeystoreInsecureUnlockAllowed,
 	}
 
+	vm.codec = Codec
+	// TODO: read size from settings
+	vm.mempool = NewMempool(defaultMempoolSize)
+
 	// Attempt to load last accepted block to determine if it is necessary to
 	// initialize state with the genesis block.
 	lastAcceptedBytes, lastAcceptedErr := vm.acceptedBlockDB.Get(lastAcceptedKey)
 	var lastAcceptedHash common.Hash
 	switch {
 	case lastAcceptedErr == database.ErrNotFound:
-		// Leave [lastAcceptedHash] as the empty value to indicate the chain should be built from genesis.
+		// // Set [lastAcceptedHash] to the genesis block hash.
+		lastAcceptedHash = ethConfig.Genesis.ToBlock(nil).Hash()
 	case lastAcceptedErr != nil:
 		return fmt.Errorf("failed to get last accepted block ID due to: %w", lastAcceptedErr)
 	case len(lastAcceptedBytes) != common.HashLength:
@@ -371,80 +366,16 @@ func (vm *VM) Initialize(
 	default:
 		lastAcceptedHash = common.BytesToHash(lastAcceptedBytes)
 	}
-	ethChain, err := coreth.NewETHChain(&ethConfig, &nodecfg, vm.chaindb, vm.config.EthBackendSettings(), lastAcceptedHash)
+	ethChain, err := coreth.NewETHChain(&ethConfig, &nodecfg, vm.chaindb, vm.config.EthBackendSettings(), vm.createConsensusCallbacks(), lastAcceptedHash)
 	if err != nil {
 		return err
 	}
 	vm.chain = ethChain
 	lastAccepted := vm.chain.LastAcceptedBlock()
 
-	// Kickoff gasPriceUpdate goroutine once the backend is initialized, if it
-	// exists
-	if gasPriceUpdate != nil {
-		go gasPriceUpdate()
-	}
+	// start goroutines to update the tx pool gas minimum gas price when upgrades go into effect
+	vm.handleGasPriceUpdates()
 
-	vm.chain.SetOnFinalizeAndAssemble(func(header *types.Header, state *state.StateDB, txs []*types.Transaction) ([]byte, error) {
-		snapshot := state.Snapshot()
-		for {
-			tx, exists := vm.mempool.NextTx()
-			if !exists {
-				break
-			}
-			if err := tx.UnsignedAtomicTx.EVMStateTransfer(vm, state); err != nil {
-				// Discard the transaction from the mempool on failed verification.
-				vm.mempool.DiscardCurrentTx()
-				state.RevertToSnapshot(snapshot)
-				continue
-			}
-			rules := vm.chainConfig.AvalancheRules(header.Number, new(big.Int).SetUint64(header.Time))
-			parentIntf, err := vm.GetBlockInternal(ids.ID(header.ParentHash))
-			if err != nil {
-				// Discard the transaction from the mempool on failed verification.
-				vm.mempool.DiscardCurrentTx()
-				return nil, fmt.Errorf("failed to get parent block: %w", err)
-			}
-			parent, ok := parentIntf.(*Block)
-			if !ok {
-				// Discard the transaction from the mempool on failed verification.
-				vm.mempool.DiscardCurrentTx()
-				return nil, fmt.Errorf("parent block %s had unexpected type %T", parentIntf.ID(), parentIntf)
-			}
-
-			if err := tx.UnsignedAtomicTx.SemanticVerify(vm, tx, parent, rules); err != nil {
-				// Discard the transaction from the mempool on failed verification.
-				vm.mempool.DiscardCurrentTx()
-				state.RevertToSnapshot(snapshot)
-				continue
-			}
-
-			atomicTxBytes, err := vm.codec.Marshal(codecVersion, tx)
-			if err != nil {
-				// Discard the transaction from the mempool and error if the transaction
-				// cannot be marshalled. This should never happen.
-				vm.mempool.DiscardCurrentTx()
-				return nil, fmt.Errorf("failed to marshal atomic transaction %s due to %w", tx.ID(), err)
-			}
-			return atomicTxBytes, nil
-		}
-
-		if len(txs) == 0 {
-			// this could happen due to the async logic of geth tx pool
-			return nil, errEmptyBlock
-		}
-
-		return nil, nil
-	})
-	vm.chain.SetOnExtraStateChange(func(block *types.Block, state *state.StateDB) error {
-		tx, err := vm.extractAtomicTx(block)
-		if err != nil {
-			return err
-		}
-		if tx == nil {
-			return nil
-		}
-		return tx.UnsignedAtomicTx.EVMStateTransfer(vm, state)
-	})
 	vm.notifyBuildBlockChan = toEngine
 
 	// buildBlockTimer handles passing PendingTxs messages to the consensus engine.
@@ -452,8 +383,6 @@ func (vm *VM) Initialize(
 	vm.buildStatus = dontBuild
 	go ctx.Log.RecoverAndPanic(vm.buildBlockTimer.Dispatch)
 
-	// TODO: read size from settings
-	vm.mempool = NewMempool(defaultMempoolSize)
 	vm.chain.Start()
 
 	vm.genesisHash = vm.chain.GetGenesisBlock().Hash()
@@ -477,7 +406,6 @@ func (vm *VM) Initialize(
 
 	vm.shutdownWg.Add(1)
 	go vm.ctx.Log.RecoverAndPanic(vm.awaitSubmittedTxs)
-	vm.codec = Codec
 
 	go vm.ctx.Log.RecoverAndPanic(vm.startContinuousProfiler)
 
@@ -487,11 +415,66 @@ func (vm *VM) Initialize(
 	// ignored by the VM's codec.
 	vm.baseCodec = linearcodec.NewDefault()
 
-	if err := vm.pruneChain(); err != nil {
-		return err
-	}
+	// pruneChain removes all rejected blocks stored in the database.
+	//
+	// TODO: This function can take over 60 minutes to run on mainnet and
+	// should be converted to run asynchronously.
+	// if err := vm.pruneChain(); err != nil {
+	// 	return err
+	// }
 
 	return vm.fx.Initialize(vm)
+}
+
+func (vm *VM) createConsensusCallbacks() *dummy.ConsensusCallbacks {
+	return &dummy.ConsensusCallbacks{
+		OnFinalizeAndAssemble: vm.onFinalizeAndAssemble,
+		OnExtraStateChange:    vm.onExtraStateChange,
+	}
+}
+
+func (vm *VM) onFinalizeAndAssemble(header *types.Header, state *state.StateDB, txs []*types.Transaction) ([]byte, error) {
+	snapshot := state.Snapshot()
+	for {
+		tx, exists := vm.mempool.NextTx()
+		if !exists {
+			break
+		}
+		rules := vm.chainConfig.AvalancheRules(header.Number, new(big.Int).SetUint64(header.Time))
+		if err := vm.verifyTx(tx, header.ParentHash, header.BaseFee, state, rules); err != nil {
+			// Discard the transaction from the mempool on failed verification.
+			vm.mempool.DiscardCurrentTx()
+			state.RevertToSnapshot(snapshot)
+			continue
+		}
+
+		atomicTxBytes, err := vm.codec.Marshal(codecVersion, tx)
+		if err != nil {
+			// Discard the transaction from the mempool and error if the transaction
+			// cannot be marshalled. This should never happen.
+			vm.mempool.DiscardCurrentTx()
+			return nil, fmt.Errorf("failed to marshal atomic transaction %s due to %w", tx.ID(), err)
+		}
+		return atomicTxBytes, nil
+	}
+
+	if len(txs) == 0 {
+		// this could happen due to the async logic of geth tx pool
+		return nil, errEmptyBlock
+	}
+
+	return nil, nil
+}
+
+func (vm *VM) onExtraStateChange(block *types.Block, state *state.StateDB) error {
+	tx, err := vm.extractAtomicTx(block)
+	if err != nil {
+		return err
+	}
+	if tx == nil {
+		return nil
+	}
+	return tx.UnsignedAtomicTx.EVMStateTransfer(vm.ctx, state)
 }
 
 func (vm *VM) pruneChain() error {
@@ -512,11 +495,11 @@ func (vm *VM) pruneChain() error {
 	}
 	heightBytes := make([]byte, 8)
 	binary.PutUvarint(heightBytes, lastAcceptedHeight)
-	if err := vm.db.Put(pruneRejectedBlocksKey, heightBytes); err == nil {
-		return nil
-	} else {
-		return fmt.Errorf("failed to write pruned rejected blocks to db: %w", err)
+	if err := vm.db.Put(pruneRejectedBlocksKey, heightBytes); err != nil {
+		return err
 	}
+
+	return vm.db.Commit()
 }
 
 // Bootstrapping notifies this VM that the consensus engine is performing
@@ -580,7 +563,10 @@ func (vm *VM) buildBlock() (snowman.Block, error) {
 	// Note: this is only called when building a new block, so caching
 	// verification will only be a significant optimization for nodes
 	// that produce a large number of blocks.
-	if err := blk.Verify(); err != nil {
+	// We call verify without writes here to avoid generating a reference
+	// to the blk state root in the triedb when we are going to call verify
+	// again from the consensus engine with writes enabled.
+	if err := blk.verify(false); err != nil {
 		vm.mempool.CancelCurrentTx()
 		return nil, fmt.Errorf("block failed verification due to: %w", err)
 	}
@@ -655,6 +641,10 @@ func (vm *VM) getBlockIDAtHeight(blkHeight uint64) (ids.ID, error) {
 	return ids.ID(ethBlock.Hash()), nil
 }
 
+func (vm *VM) Version() (string, error) {
+	return Version, nil
+}
+
 // NewHandler returns a new Handler for a service where:
 //   * The handler's functionality is defined by [service]
 //     [service] should be a gorilla RPC service (see https://www.gorillatoolkit.org/pkg/rpc/v2)
@@ -718,13 +708,13 @@ func (vm *VM) CreateHandlers() (map[string]*commonEng.HTTPHandler, error) {
 	return map[string]*commonEng.HTTPHandler{
 		"/rpc":  {LockOptions: commonEng.NoLock, Handler: handler},
 		"/avax": avaxAPI,
-		"/ws":   {LockOptions: commonEng.NoLock, Handler: handler.WebsocketHandler([]string{"*"})},
+		"/ws":   {LockOptions: commonEng.NoLock, Handler: handler.WebsocketHandlerWithDuration([]string{"*"}, vm.config.APIMaxDuration.Duration)},
 	}, nil
 }
 
 // CreateStaticHandlers makes new http handlers that can handle API calls
 func (vm *VM) CreateStaticHandlers() (map[string]*commonEng.HTTPHandler, error) {
-	handler := rpc.NewServer()
+	handler := rpc.NewServer(0)
 	if err := handler.RegisterName("static", &StaticService{}); err != nil {
 		return nil, err
 	}
@@ -774,7 +764,7 @@ func (vm *VM) conflicts(inputs ids.Set, ancestor *Block) error {
 		}
 
 		// Move up the chain.
-		nextAncestorIntf := ancestor.Parent()
+		nextAncestorID := ancestor.Parent()
 		// If the ancestor is unknown, then the parent failed
 		// verification when it was called.
 		// If the ancestor is rejected, then this block shouldn't be
@@ -782,6 +772,11 @@ func (vm *VM) conflicts(inputs ids.Set, ancestor *Block) error {
 		// will be missing.
 		// If the ancestor is processing, then the block may have
 		// been verified.
+		nextAncestorIntf, err := vm.GetBlockInternal(nextAncestorID)
+		if err != nil {
+			return errRejectedParent
+		}
+
 		if blkStatus := nextAncestorIntf.Status(); blkStatus == choices.Unknown || blkStatus == choices.Rejected {
 			return errRejectedParent
 		}
@@ -972,11 +967,56 @@ func (vm *VM) ParseAddress(addrStr string) (ids.ID, ids.ShortID, error) {
 	return chainID, addr, nil
 }
 
-// issueTx adds [tx] to the mempool and signals the goroutine waiting on
-// atomic transactions that there is an atomic transaction ready to be
-// put into a block.
+// issueTx verifies [tx] as valid to be issued on top of the currently preferred block
+// and then issues [tx] into the mempool if valid.
 func (vm *VM) issueTx(tx *Tx) error {
+	if err := vm.verifyTxAtTip(tx); err != nil {
+		return err
+	}
 	return vm.mempool.AddTx(tx)
+}
+
+// verifyTxAtTip verifies that [tx] is valid to be issued on top of the currently preferred block
+func (vm *VM) verifyTxAtTip(tx *Tx) error {
+	preferredBlock := vm.chain.CurrentBlock()
+	preferredState, err := vm.chain.BlockState(preferredBlock)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve block state at tip while verifying atomic tx: %w", err)
+	}
+	rules := vm.currentRules()
+	parentHeader := preferredBlock.Header()
+	var nextBaseFee *big.Int
+	timestamp := time.Now().Unix()
+	bigTimestamp := big.NewInt(timestamp)
+	if vm.chainConfig.IsApricotPhase3(bigTimestamp) {
+		_, nextBaseFee, err = dummy.CalcBaseFee(vm.chainConfig, parentHeader, uint64(timestamp))
+		if err != nil {
+			// Return extremely detailed error since CalcBaseFee should never encounter an issue here
+			return fmt.Errorf("failed to calculate base fee with parent timestamp (%d), parent ExtraData: (0x%x), and current timestamp (%d): %w", parentHeader.Time, parentHeader.Extra, timestamp, err)
+		}
+	}
+
+	return vm.verifyTx(tx, parentHeader.Hash(), nextBaseFee, preferredState, rules)
+}
+
+// verifyTx verifies that [tx] is valid to be issued into a block with parent block [parentHash]
+// and validated at [state] using [rules] as the current rule set.
+// Note: verifyTx may modify [state]. If [state] needs to be properly maintained, the caller is responsible
+// for reverting to the correct snapshot after calling this function. If this function is called with a
+// throwaway state, then this is not necessary.
+func (vm *VM) verifyTx(tx *Tx, parentHash common.Hash, baseFee *big.Int, state *state.StateDB, rules params.Rules) error {
+	parentIntf, err := vm.GetBlockInternal(ids.ID(parentHash))
+	if err != nil {
+		return fmt.Errorf("failed to get parent block: %w", err)
+	}
+	parent, ok := parentIntf.(*Block)
+	if !ok {
+		return fmt.Errorf("parent block %s had unexpected type %T", parentIntf.ID(), parentIntf)
+	}
+	if err := tx.UnsignedAtomicTx.SemanticVerify(vm, tx, parent, baseFee, rules); err != nil {
+		return err
+	}
+	return tx.UnsignedAtomicTx.EVMStateTransfer(vm.ctx, state)
 }
 
 // GetAtomicUTXOs returns the utxos that at least one of the provided addresses is
@@ -1028,12 +1068,16 @@ func (vm *VM) GetAtomicUTXOs(
 	return utxos, lastAddrID, lastUTXOID, nil
 }
 
-// GetSpendableFunds returns a list of EVMInputs and keys (in corresponding order)
-// to total [amount] of [assetID] owned by [keys]
-// Note: we return [][]*crypto.PrivateKeySECP256K1R even though each input corresponds
-// to a single key, so that the signers can be passed in to [tx.Sign] which supports
-// multiple keys on a single input.
-func (vm *VM) GetSpendableFunds(keys []*crypto.PrivateKeySECP256K1R, assetID ids.ID, amount uint64) ([]EVMInput, [][]*crypto.PrivateKeySECP256K1R, error) {
+// GetSpendableFunds returns a list of EVMInputs and keys (in corresponding
+// order) to total [amount] of [assetID] owned by [keys].
+// Note: we return [][]*crypto.PrivateKeySECP256K1R even though each input
+// corresponds to a single key, so that the signers can be passed in to
+// [tx.Sign] which supports multiple keys on a single input.
+func (vm *VM) GetSpendableFunds(
+	keys []*crypto.PrivateKeySECP256K1R,
+	assetID ids.ID,
+	amount uint64,
+) ([]EVMInput, [][]*crypto.PrivateKeySECP256K1R, error) {
 	// Note: current state uses the state of the preferred block.
 	state, err := vm.chain.CurrentState()
 	if err != nil {
@@ -1083,6 +1127,106 @@ func (vm *VM) GetSpendableFunds(keys []*crypto.PrivateKeySECP256K1R, assetID ids
 	return inputs, signers, nil
 }
 
+// GetSpendableAVAXWithFee returns a list of EVMInputs and keys (in corresponding
+// order) to total [amount] + [fee] of [AVAX] owned by [keys].
+// This function accounts for the added cost of the additional inputs needed to
+// create the transaction and makes sure to skip any keys with a balance that is
+// insufficient to cover the additional fee.
+// Note: we return [][]*crypto.PrivateKeySECP256K1R even though each input
+// corresponds to a single key, so that the signers can be passed in to
+// [tx.Sign] which supports multiple keys on a single input.
+func (vm *VM) GetSpendableAVAXWithFee(
+	keys []*crypto.PrivateKeySECP256K1R,
+	amount uint64,
+	cost uint64,
+	baseFee *big.Int,
+) ([]EVMInput, [][]*crypto.PrivateKeySECP256K1R, error) {
+	// Note: current state uses the state of the preferred block.
+	state, err := vm.chain.CurrentState()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	initialFee, err := calculateDynamicFee(cost, baseFee)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	newAmount, err := math.Add64(amount, initialFee)
+	if err != nil {
+		return nil, nil, err
+	}
+	amount = newAmount
+
+	inputs := []EVMInput{}
+	signers := [][]*crypto.PrivateKeySECP256K1R{}
+	// Note: we assume that each key in [keys] is unique, so that iterating over
+	// the keys will not produce duplicated nonces in the returned EVMInput slice.
+	for _, key := range keys {
+		if amount == 0 {
+			break
+		}
+
+		prevFee, err := calculateDynamicFee(cost, baseFee)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		newCost := cost + EVMInputGas
+		newFee, err := calculateDynamicFee(newCost, baseFee)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		additionalFee := newFee - prevFee
+
+		addr := GetEthAddress(key)
+		// Since the asset is AVAX, we divide by the x2cRate to convert back to
+		// the correct denomination of AVAX that can be exported.
+		balance := new(big.Int).Div(state.GetBalance(addr), x2cRate).Uint64()
+		// If the balance for [addr] is insufficient to cover the additional cost
+		// of adding an input to the transaction, skip adding the input altogether
+		if balance <= additionalFee {
+			continue
+		}
+
+		// Update the cost for the next iteration
+		cost = newCost
+
+		newAmount, err := math.Add64(amount, additionalFee)
+		if err != nil {
+			return nil, nil, err
+		}
+		amount = newAmount
+
+		// Use the entire [balance] as an input, but if the required [amount]
+		// is less than the balance, update the [inputAmount] to spend the
+		// minimum amount to finish the transaction.
+		inputAmount := balance
+		if amount < balance {
+			inputAmount = amount
+		}
+		nonce, err := vm.GetCurrentNonce(addr)
+		if err != nil {
+			return nil, nil, err
+		}
+		inputs = append(inputs, EVMInput{
+			Address: addr,
+			Amount:  inputAmount,
+			AssetID: vm.ctx.AVAXAssetID,
+			Nonce:   nonce,
+		})
+		signers = append(signers, []*crypto.PrivateKeySECP256K1R{key})
+		amount -= inputAmount
+	}
+
+	if amount > 0 {
+		return nil, nil, errInsufficientFunds
+	}
+
+	return inputs, signers, nil
+}
+
 // GetCurrentNonce returns the nonce associated with the address at the
 // preferred block
 func (vm *VM) GetCurrentNonce(address common.Address) (uint64, error) {
@@ -1104,10 +1248,10 @@ func (vm *VM) currentRules() params.Rules {
 // follows the ruleset defined by [rules]
 func (vm *VM) getBlockValidator(rules params.Rules) BlockValidator {
 	switch {
-	case rules.IsApricotPhase2:
+	case rules.IsApricotPhase3:
+		return phase3BlockValidator
+	case rules.IsApricotPhase2, rules.IsApricotPhase1:
 		// Note: the phase1BlockValidator is used in both apricot phase1 and phase2
-		return phase1BlockValidator
-	case rules.IsApricotPhase1:
 		return phase1BlockValidator
 	default:
 		return phase0BlockValidator
@@ -1140,54 +1284,19 @@ func (vm *VM) startContinuousProfiler() {
 	<-vm.shutdownChan
 }
 
-// ParseLocalAddress takes in an address for this chain and produces the ID
-func (vm *VM) ParseLocalAddress(addrStr string) (ids.ShortID, error) {
-	chainID, addr, err := vm.ParseAddress(addrStr)
+func (vm *VM) estimateBaseFee(ctx context.Context) (*big.Int, error) {
+	// Get the base fee to use
+	baseFee, err := vm.chain.APIBackend().EstimateBaseFee(ctx)
 	if err != nil {
-		return ids.ShortID{}, err
+		return nil, err
 	}
-	if chainID != vm.ctx.ChainID {
-		return ids.ShortID{}, fmt.Errorf("expected chainID to be %q but was %q",
-			vm.ctx.ChainID, chainID)
+	if baseFee == nil {
+		baseFee = initialBaseFee
+	} else {
+		// give some breathing room
+		baseFee.Mul(baseFee, big.NewInt(11))
+		baseFee.Div(baseFee, big.NewInt(10))
 	}
-	return addr, nil
-}
 
-// FormatLocalAddress takes in a raw address and produces the formatted address
-func (vm *VM) FormatLocalAddress(addr ids.ShortID) (string, error) {
-	return vm.FormatAddress(vm.ctx.ChainID, addr)
-}
-
-// FormatAddress takes in a chainID and a raw address and produces the formatted
-// address
-func (vm *VM) FormatAddress(chainID ids.ID, addr ids.ShortID) (string, error) {
-	chainIDAlias, err := vm.ctx.BCLookup.PrimaryAlias(chainID)
-	if err != nil {
-		return "", err
-	}
-	hrp := constants.GetHRP(vm.ctx.NetworkID)
-	return formatting.FormatAddress(chainIDAlias, hrp, addr.Bytes())
-}
-
-// ParseEthAddress parses [addrStr] and returns an Ethereum address
-func ParseEthAddress(addrStr string) (common.Address, error) {
-	if !common.IsHexAddress(addrStr) {
-		return common.Address{}, errInvalidAddr
-	}
-	return common.HexToAddress(addrStr), nil
-}
-
-// FormatEthAddress formats [addr] into a string
-func FormatEthAddress(addr common.Address) string {
-	return addr.Hex()
-}
-
-// GetEthAddress returns the ethereum address derived from [privKey]
-func GetEthAddress(privKey *crypto.PrivateKeySECP256K1R) common.Address {
-	return PublicKeyToEthAddress(privKey.PublicKey().(*crypto.PublicKeySECP256K1R))
-}
-
-// PublicKeyToEthAddress returns the ethereum address derived from [pubKey]
-func PublicKeyToEthAddress(pubKey *crypto.PublicKeySECP256K1R) common.Address {
-	return ethcrypto.PubkeyToAddress(*(pubKey.ToECDSA()))
+	return baseFee, nil
 }

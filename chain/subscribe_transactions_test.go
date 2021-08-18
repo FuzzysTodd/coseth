@@ -10,7 +10,7 @@ import (
 	"github.com/tenderly/coreth/core/types"
 )
 
-func TestSubscribeTransactionsTest(t *testing.T) {
+func TestSubscribeTransactions(t *testing.T) {
 	chain, newTxPoolHeadChan, txSubmitCh := NewDefaultChain(t)
 
 	ethBackend := chain.APIBackend()
@@ -21,18 +21,6 @@ func TestSubscribeTransactionsTest(t *testing.T) {
 
 	pendingTxsEventsChannel := make(chan []common.Hash)
 	pendingTxsEvents := eventSystem.SubscribePendingTxs(pendingTxsEventsChannel)
-
-	// Override SetOnSealFinish set in NewDefaultChain, so that each sealed block
-	// is set as the new preferred block within this test, but not immediately marked
-	// as accepted.
-	chain.SetOnSealFinish(func(block *types.Block) {
-		if err := chain.InsertBlock(block); err != nil {
-			t.Fatal(err)
-		}
-		if err := chain.SetPreference(block); err != nil {
-			t.Fatal(err)
-		}
-	})
 
 	chain.Start()
 	defer chain.Stop()
@@ -85,6 +73,7 @@ func TestSubscribeTransactionsTest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	insertAndSetPreference(t, chain, block)
 
 	<-newTxPoolHeadChan
 
@@ -94,16 +83,12 @@ func TestSubscribeTransactionsTest(t *testing.T) {
 	default:
 	}
 
-	select {
-	case pendingTx := <-pendingTxsEventsChannel:
-		if len(pendingTx) != 1 {
-			t.Fatal("Expected a new pending tx")
-		}
-		if pendingTx[0] != signedTx.Hash() {
-			t.Fatalf("Expected a new pending tx for signed hash %s", signedTx.Hash().String())
-		}
-	default:
-		t.Fatal("Expected to receive pending transaction from subscription")
+	pendingTx := <-pendingTxsEventsChannel
+	if len(pendingTx) != 1 {
+		t.Fatal("Expected a new pending tx")
+	}
+	if pendingTx[0] != signedTx.Hash() {
+		t.Fatalf("Expected a new pending tx for signed hash %s", signedTx.Hash().String())
 	}
 
 	if err := chain.Accept(block); err != nil {

@@ -59,6 +59,7 @@ func TestCounter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	insertAndAccept(t, chain, block)
 
 	<-newTxPoolHeadChan
 	log.Info("Generated block with new counter contract creation", "blkNumber", block.NumberU64())
@@ -91,6 +92,7 @@ func TestCounter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	insertAndAccept(t, chain, block)
 
 	<-newTxPoolHeadChan
 	log.Info("Generated block with counter contract interactions", "blkNumber", block.NumberU64())
@@ -107,7 +109,6 @@ func TestCounter(t *testing.T) {
 
 	log.Info(fmt.Sprintf("genesis balance = %s", state.GetBalance(fundedKey.Address)))
 	log.Info(fmt.Sprintf("contract balance = %s", state.GetBalance(contractAddr)))
-	log.Info(fmt.Sprintf("state = %s", state.Dump(true, false, true)))
 	log.Info(fmt.Sprintf("x = %s", xState.String()))
 	if xState.Big().Cmp(big.NewInt(52)) != 0 {
 		t.Fatal("incorrect state value")

@@ -28,8 +28,6 @@
 package miner
 
 import (
-	"math/big"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/tenderly/coreth/consensus"
@@ -46,20 +44,16 @@ type Backend interface {
 
 // Config is the configuration parameters of mining.
 type Config struct {
-	Etherbase             common.Address `toml:",omitempty"` // Public address for block mining rewards (default = first account)
-	GasFloor              uint64         // Target gas floor for mined blocks.
-	GasCeil               uint64         // Target gas ceiling for mined blocks.
-	GasPrice              *big.Int       // Minimum gas price for mining a transaction
-	ApricotPhase1GasLimit uint64         // Gas Limit for mined blocks as of Apricot Phase 1.
+	Etherbase common.Address `toml:",omitempty"` // Public address for block mining rewards (default = first account)
 }
 
 type Miner struct {
 	worker *worker
 }
 
-func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine, mcb *MinerCallbacks) *Miner {
+func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine) *Miner {
 	return &Miner{
-		worker: newWorker(config, chainConfig, engine, eth, mux, mcb),
+		worker: newWorker(config, chainConfig, engine, eth, mux),
 	}
 }
 
