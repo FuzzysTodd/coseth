@@ -12,9 +12,9 @@ import (
 	"github.com/ava-labs/avalanchego/database/versiondb"
 	"github.com/ava-labs/avalanchego/utils/wrappers"
 
-	"github.com/ava-labs/coreth/plugin/evm/message"
-	syncclient "github.com/ava-labs/coreth/sync/client"
-	"github.com/ava-labs/coreth/trie"
+	"github.com/tenderly/coreth/plugin/evm/message"
+	syncclient "github.com/tenderly/coreth/sync/client"
+	"github.com/tenderly/coreth/trie"
 	"github.com/ethereum/go-ethereum/common"
 )
 
