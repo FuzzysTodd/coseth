@@ -32,13 +32,13 @@ import (
 	"github.com/ava-labs/coreth/core"
 	"github.com/ava-labs/coreth/eth/gasprice"
 	"github.com/ava-labs/coreth/miner"
-	"github.com/ethereum/go-ethereum/common"
 )
 
 // DefaultFullGPOConfig contains default gasprice oracle settings for full node.
 var DefaultFullGPOConfig = gasprice.Config{
 	Blocks:              40,
 	Percentile:          60,
+	MaxLookbackSeconds:  gasprice.DefaultMaxLookbackSeconds,
 	MaxCallBlockHistory: gasprice.DefaultMaxCallBlockHistory,
 	MaxBlockHistory:     gasprice.DefaultMaxBlockHistory,
 	MinPrice:            gasprice.DefaultMinPrice,
@@ -59,6 +59,7 @@ func NewDefaultConfig() Config {
 		TrieDirtyCache:        256,
 		TrieDirtyCommitTarget: 20,
 		SnapshotCache:         128,
+		FilterLogCacheSize:    32,
 		Miner:                 miner.Config{},
 		TxPool:                core.DefaultTxPoolConfig,
 		RPCGasCap:             25000000,
@@ -68,7 +69,7 @@ func NewDefaultConfig() Config {
 	}
 }
 
-//go:generate gencodec -type Config -formats toml -out gen_config.go
+//go:generate go run github.com/fjl/gencodec -type Config -formats toml -out gen_config.go
 
 // Config contains configuration options for of the ETH and LES protocols.
 type Config struct {
@@ -94,9 +95,6 @@ type Config struct {
 	SnapshotVerify                  bool    // Whether to verify generated snapshots
 	SkipSnapshotRebuild             bool    // Whether to skip rebuilding the snapshot in favor of returning an error (only set to true for tests)
 
-	// Whitelist of required block number -> hash values to accept
-	Whitelist map[uint64]common.Hash `toml:"-"`
-
 	// Light client options
 	LightServ    int  `toml:",omitempty"` // Maximum percentage of time allowed for serving LES requests
 	LightIngress int  `toml:",omitempty"` // Incoming bandwidth limit for light servers
@@ -121,6 +119,9 @@ type Config struct {
 	SnapshotCache         int
 	Preimages             bool
 
+	// This is the number of blocks for which logs will be cached in the filter system.
+	FilterLogCacheSize int
+
 	// Mining options
 	Miner miner.Config
 
@@ -143,7 +144,7 @@ type Config struct {
 	RPCEVMTimeout time.Duration
 
 	// RPCTxFeeCap is the global transaction fee(price * gaslimit) cap for
-	// send-transction variants. The unit is ether.
+	// send-transaction variants. The unit is ether.
 	RPCTxFeeCap float64 `toml:",omitempty"`
 
 	// AllowUnfinalizedQueries allow unfinalized queries

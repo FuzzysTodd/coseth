@@ -18,17 +18,17 @@ import (
 	"github.com/ava-labs/coreth/sync/client/stats"
 
 	"github.com/ava-labs/avalanchego/codec"
-	"github.com/ava-labs/avalanchego/utils/constants"
 	"github.com/ava-labs/avalanchego/version"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ava-labs/coreth/ethdb"
 	"github.com/ava-labs/coreth/peer"
 	"github.com/ava-labs/coreth/plugin/evm/message"
 	"github.com/ava-labs/coreth/trie"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 const (
@@ -38,7 +38,11 @@ const (
 )
 
 var (
-	StateSyncVersion          = version.NewDefaultApplication(constants.PlatformName, 1, 7, 13)
+	StateSyncVersion = &version.Application{
+		Major: 1,
+		Minor: 7,
+		Patch: 13,
+	}
 	errEmptyResponse          = errors.New("empty response")
 	errTooManyBlocks          = errors.New("response contains more blocks than requested")
 	errHashMismatch           = errors.New("hash does not match expected value")
@@ -53,7 +57,7 @@ var _ Client = &client{}
 // Client synchronously fetches data from the network to fulfill state sync requests.
 // Repeatedly requests failed requests until the context to the request is expired.
 type Client interface {
-	// GetLeafs synchronously sends given request, returning parsed *LeafsResponse or error
+	// GetLeafs synchronously sends the given request, returning a parsed LeafsResponse or error
 	// Note: this verifies the response including the range proofs.
 	GetLeafs(ctx context.Context, request message.LeafsRequest) (message.LeafsResponse, error)
 
@@ -357,7 +361,7 @@ func (c *client) get(ctx context.Context, request message.Request, parseFn parse
 			bandwidth := float64(len(response)) / (time.Since(start).Seconds() + epsilon)
 			c.networkClient.TrackBandwidth(nodeID, bandwidth)
 			metric.IncSucceeded()
-			metric.UpdateReceived(int64(numElements))
+			metric.IncReceived(int64(numElements))
 			return responseIntf, nil
 		}
 	}

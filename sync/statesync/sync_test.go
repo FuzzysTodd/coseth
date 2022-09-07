@@ -4,9 +4,12 @@
 package statesync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math/rand"
+	"runtime/pprof"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,7 +29,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const testSyncTimeout = 20 * time.Second
+const testSyncTimeout = 30 * time.Second
+
+var errInterrupted = errors.New("interrupted sync")
 
 type syncTest struct {
 	ctx               context.Context
@@ -37,6 +42,7 @@ type syncTest struct {
 }
 
 func testSync(t *testing.T, test syncTest) {
+	t.Helper()
 	ctx := context.Background()
 	if test.ctx != nil {
 		ctx = test.ctx
@@ -49,11 +55,13 @@ func testSync(t *testing.T, test syncTest) {
 	mockClient.GetLeafsIntercept = test.GetLeafsIntercept
 	mockClient.GetCodeIntercept = test.GetCodeIntercept
 
-	s, err := NewEVMStateSyncer(&EVMStateSyncerConfig{
-		Client:    mockClient,
-		Root:      root,
-		DB:        clientDB,
-		BatchSize: 1000, // Use a lower batch size in order to get test coverage of batches being written early.
+	s, err := NewStateSyncer(&StateSyncerConfig{
+		Client:                   mockClient,
+		Root:                     root,
+		DB:                       clientDB,
+		BatchSize:                1000, // Use a lower batch size in order to get test coverage of batches being written early.
+		NumCodeFetchingWorkers:   DefaultNumCodeFetchingWorkers,
+		MaxOutstandingCodeHashes: DefaultMaxOutstandingCodeHashes,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -91,24 +99,34 @@ func waitFor(t *testing.T, result <-chan error, expected error, timeout time.Dur
 			t.Fatal("unexpected error waiting for sync result", err)
 		}
 	case <-time.After(timeout):
+		// print a stack trace to assist with debugging
+		// if the test times out.
+		var stackBuf bytes.Buffer
+		pprof.Lookup("goroutine").WriteTo(&stackBuf, 2)
+		t.Log(stackBuf.String())
+		// fail the test
 		t.Fatal("unexpected timeout waiting for sync result")
 	}
 }
 
 func TestSimpleSyncCases(t *testing.T) {
-	clientErr := errors.New("dummy client error")
+	var (
+		numAccounts      = 250
+		numAccountsSmall = 10
+		clientErr        = errors.New("dummy client error")
+	)
 	tests := map[string]syncTest{
 		"accounts": {
 			prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
 				serverTrieDB := trie.NewDatabase(memorydb.New())
-				root, _ := trie.FillAccounts(t, serverTrieDB, common.Hash{}, 1000, nil)
+				root, _ := trie.FillAccounts(t, serverTrieDB, common.Hash{}, numAccounts, nil)
 				return memorydb.New(), serverTrieDB, root
 			},
 		},
 		"accounts with code": {
 			prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
 				serverTrieDB := trie.NewDatabase(memorydb.New())
-				root, _ := trie.FillAccounts(t, serverTrieDB, common.Hash{}, 1000, func(t *testing.T, index int, account types.StateAccount) types.StateAccount {
+				root, _ := trie.FillAccounts(t, serverTrieDB, common.Hash{}, numAccounts, func(t *testing.T, index int, account types.StateAccount) types.StateAccount {
 					if index%3 == 0 {
 						codeBytes := make([]byte, 256)
 						_, err := rand.Read(codeBytes)
@@ -128,14 +146,14 @@ func TestSimpleSyncCases(t *testing.T) {
 		"accounts with code and storage": {
 			prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
 				serverTrieDB := trie.NewDatabase(memorydb.New())
-				root := fillAccountsWithStorage(t, serverTrieDB, common.Hash{}, 1000)
+				root := fillAccountsWithStorage(t, serverTrieDB, common.Hash{}, numAccounts)
 				return memorydb.New(), serverTrieDB, root
 			},
 		},
 		"accounts with storage": {
 			prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
 				serverTrieDB := trie.NewDatabase(memorydb.New())
-				root, _ := trie.FillAccounts(t, serverTrieDB, common.Hash{}, 1000, func(t *testing.T, i int, account types.StateAccount) types.StateAccount {
+				root, _ := trie.FillAccounts(t, serverTrieDB, common.Hash{}, numAccounts, func(t *testing.T, i int, account types.StateAccount) types.StateAccount {
 					if i%5 == 0 {
 						account.Root, _, _ = trie.GenerateTrie(t, serverTrieDB, 16, common.HashLength)
 					}
@@ -148,14 +166,14 @@ func TestSimpleSyncCases(t *testing.T) {
 		"accounts with overlapping storage": {
 			prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
 				serverTrieDB := trie.NewDatabase(memorydb.New())
-				root, _ := FillAccountsWithOverlappingStorage(t, serverTrieDB, common.Hash{}, 1000, 3)
+				root, _ := FillAccountsWithOverlappingStorage(t, serverTrieDB, common.Hash{}, numAccounts, 3)
 				return memorydb.New(), serverTrieDB, root
 			},
 		},
 		"failed to fetch leafs": {
 			prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
 				serverTrieDB := trie.NewDatabase(memorydb.New())
-				root, _ := trie.FillAccounts(t, serverTrieDB, common.Hash{}, 100, nil)
+				root, _ := trie.FillAccounts(t, serverTrieDB, common.Hash{}, numAccountsSmall, nil)
 				return memorydb.New(), serverTrieDB, root
 			},
 			GetLeafsIntercept: func(_ message.LeafsRequest, _ message.LeafsResponse) (message.LeafsResponse, error) {
@@ -166,7 +184,7 @@ func TestSimpleSyncCases(t *testing.T) {
 		"failed to fetch code": {
 			prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
 				serverTrieDB := trie.NewDatabase(memorydb.New())
-				root := fillAccountsWithStorage(t, serverTrieDB, common.Hash{}, 100)
+				root := fillAccountsWithStorage(t, serverTrieDB, common.Hash{}, numAccountsSmall)
 				return memorydb.New(), serverTrieDB, root
 			},
 			GetCodeIntercept: func(_ []common.Hash, _ [][]byte) ([][]byte, error) {
@@ -202,29 +220,44 @@ func TestCancelSync(t *testing.T) {
 	})
 }
 
+// interruptLeafsIntercept provides the parameters to the getLeafsIntercept
+// function which returns [errInterrupted] after passing through [numRequests]
+// leafs requests for [root].
+type interruptLeafsIntercept struct {
+	numRequests    uint32
+	interruptAfter uint32
+	root           common.Hash
+}
+
+// getLeafsIntercept can be passed to mockClient and returns an unmodified
+// response for the first [numRequest] requests for leafs from [root].
+// After that, all requests for leafs from [root] return [errInterrupted].
+func (i *interruptLeafsIntercept) getLeafsIntercept(request message.LeafsRequest, response message.LeafsResponse) (message.LeafsResponse, error) {
+	if request.Root == i.root {
+		if numRequests := atomic.AddUint32(&i.numRequests, 1); numRequests > i.interruptAfter {
+			return message.LeafsResponse{}, errInterrupted
+		}
+	}
+	return response, nil
+}
+
 func TestResumeSyncAccountsTrieInterrupted(t *testing.T) {
 	serverTrieDB := trie.NewDatabase(memorydb.New())
 	root, _ := FillAccountsWithOverlappingStorage(t, serverTrieDB, common.Hash{}, 2000, 3)
-	errInterrupted := errors.New("interrupted sync")
 	clientDB := memorydb.New()
-	accountLeavesRequests := 0
+	intercept := &interruptLeafsIntercept{
+		root:           root,
+		interruptAfter: 1,
+	}
 	testSync(t, syncTest{
 		prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
 			return clientDB, serverTrieDB, root
 		},
-		expectedError: errInterrupted,
-		GetLeafsIntercept: func(request message.LeafsRequest, response message.LeafsResponse) (message.LeafsResponse, error) {
-			if request.Root == root && accountLeavesRequests >= 1 {
-				return message.LeafsResponse{}, errInterrupted
-			}
-			if request.Root == root {
-				accountLeavesRequests++
-			}
-			return response, nil
-		},
+		expectedError:     errInterrupted,
+		GetLeafsIntercept: intercept.getLeafsIntercept,
 	})
 
-	assert.Equal(t, 1, accountLeavesRequests)
+	assert.EqualValues(t, 2, intercept.numRequests)
 
 	testSync(t, syncTest{
 		prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
@@ -244,23 +277,17 @@ func TestResumeSyncLargeStorageTrieInterrupted(t *testing.T) {
 		}
 		return account
 	})
-	errInterrupted := errors.New("interrupted sync")
 	clientDB := memorydb.New()
-	largeStorageRootRequests := 0
+	intercept := &interruptLeafsIntercept{
+		root:           largeStorageRoot,
+		interruptAfter: 1,
+	}
 	testSync(t, syncTest{
 		prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
 			return clientDB, serverTrieDB, root
 		},
-		expectedError: errInterrupted,
-		GetLeafsIntercept: func(request message.LeafsRequest, response message.LeafsResponse) (message.LeafsResponse, error) {
-			if request.Root == largeStorageRoot && largeStorageRootRequests >= 1 {
-				return message.LeafsResponse{}, errInterrupted
-			}
-			if request.Root == largeStorageRoot {
-				largeStorageRootRequests++
-			}
-			return response, nil
-		},
+		expectedError:     errInterrupted,
+		GetLeafsIntercept: intercept.getLeafsIntercept,
 	})
 
 	testSync(t, syncTest{
@@ -288,23 +315,17 @@ func TestResumeSyncToNewRootAfterLargeStorageTrieInterrupted(t *testing.T) {
 		}
 		return account
 	})
-	errInterrupted := errors.New("interrupted sync")
 	clientDB := memorydb.New()
-	largeStorageRootRequests := 0
+	intercept := &interruptLeafsIntercept{
+		root:           largeStorageRoot1,
+		interruptAfter: 1,
+	}
 	testSync(t, syncTest{
 		prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
 			return clientDB, serverTrieDB, root1
 		},
-		expectedError: errInterrupted,
-		GetLeafsIntercept: func(request message.LeafsRequest, response message.LeafsResponse) (message.LeafsResponse, error) {
-			if request.Root == largeStorageRoot1 && largeStorageRootRequests >= 1 {
-				return message.LeafsResponse{}, errInterrupted
-			}
-			if request.Root == largeStorageRoot1 {
-				largeStorageRootRequests++
-			}
-			return response, nil
-		},
+		expectedError:     errInterrupted,
+		GetLeafsIntercept: intercept.getLeafsIntercept,
 	})
 
 	<-snapshot.WipeSnapshot(clientDB, false)
@@ -327,23 +348,17 @@ func TestResumeSyncLargeStorageTrieWithConsecutiveDuplicatesInterrupted(t *testi
 		}
 		return account
 	})
-	errInterrupted := errors.New("interrupted sync")
 	clientDB := memorydb.New()
-	largeStorageRootRequests := 0
+	intercept := &interruptLeafsIntercept{
+		root:           largeStorageRoot,
+		interruptAfter: 1,
+	}
 	testSync(t, syncTest{
 		prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
 			return clientDB, serverTrieDB, root
 		},
-		expectedError: errInterrupted,
-		GetLeafsIntercept: func(request message.LeafsRequest, response message.LeafsResponse) (message.LeafsResponse, error) {
-			if request.Root == largeStorageRoot && largeStorageRootRequests >= 1 {
-				return message.LeafsResponse{}, errInterrupted
-			}
-			if request.Root == largeStorageRoot {
-				largeStorageRootRequests++
-			}
-			return response, nil
-		},
+		expectedError:     errInterrupted,
+		GetLeafsIntercept: intercept.getLeafsIntercept,
 	})
 
 	testSync(t, syncTest{
@@ -363,23 +378,17 @@ func TestResumeSyncLargeStorageTrieWithSpreadOutDuplicatesInterrupted(t *testing
 		}
 		return account
 	})
-	errInterrupted := errors.New("interrupted sync")
 	clientDB := memorydb.New()
-	largeStorageRootRequests := 0
+	intercept := &interruptLeafsIntercept{
+		root:           largeStorageRoot,
+		interruptAfter: 1,
+	}
 	testSync(t, syncTest{
 		prepareForTest: func(t *testing.T) (ethdb.Database, *trie.Database, common.Hash) {
 			return clientDB, serverTrieDB, root
 		},
-		expectedError: errInterrupted,
-		GetLeafsIntercept: func(request message.LeafsRequest, response message.LeafsResponse) (message.LeafsResponse, error) {
-			if request.Root == largeStorageRoot && largeStorageRootRequests >= 1 {
-				return message.LeafsResponse{}, errInterrupted
-			}
-			if request.Root == largeStorageRoot {
-				largeStorageRootRequests++
-			}
-			return response, nil
-		},
+		expectedError:     errInterrupted,
+		GetLeafsIntercept: intercept.getLeafsIntercept,
 	})
 
 	testSync(t, syncTest{
@@ -414,7 +423,7 @@ func TestResyncNewRootAfterDeletes(t *testing.T) {
 		},
 		"delete intermediate storage nodes": {
 			deleteBetweenSyncs: func(t *testing.T, root common.Hash, clientTrieDB *trie.Database) {
-				tr, err := trie.New(root, clientTrieDB)
+				tr, err := trie.New(common.Hash{}, root, clientTrieDB)
 				if err != nil {
 					t.Fatal(err)
 				}
