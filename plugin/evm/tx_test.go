@@ -128,7 +128,7 @@ func executeTxTest(t *testing.T, test atomicTxTest) {
 	}
 
 	// Retrieve dummy state to test that EVMStateTransfer works correctly
-	sdb, err := vm.chain.BlockState(lastAcceptedBlock.ethBlock)
+	sdb, err := vm.blockChain.StateAt(lastAcceptedBlock.ethBlock.Root())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,6 +143,13 @@ func executeTxTest(t *testing.T, test atomicTxTest) {
 		}
 		// If EVMStateTransfer failed for the expected reason, return early
 		return
+	}
+
+	if test.bootstrapping {
+		// If this test simulates processing txs during bootstrapping (where some verification is skipped),
+		// initialize the block building goroutines normally initialized in SetState(snow.NormalOps).
+		// This ensures that the VM can build a block correctly during the test.
+		vm.initBlockBuilding()
 	}
 
 	if err := vm.issueTx(tx, true /*=local*/); err != nil {

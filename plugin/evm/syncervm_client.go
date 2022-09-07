@@ -14,9 +14,9 @@ import (
 	commonEng "github.com/ava-labs/avalanchego/snow/engine/common"
 	"github.com/ava-labs/avalanchego/snow/engine/snowman/block"
 	"github.com/ava-labs/avalanchego/vms/components/chain"
-	coreth "github.com/ava-labs/coreth/chain"
 	"github.com/ava-labs/coreth/core/rawdb"
 	"github.com/ava-labs/coreth/core/state/snapshot"
+	"github.com/ava-labs/coreth/eth"
 	"github.com/ava-labs/coreth/ethdb"
 	"github.com/ava-labs/coreth/params"
 	"github.com/ava-labs/coreth/plugin/evm/message"
@@ -45,13 +45,13 @@ type stateSyncClientConfig struct {
 
 	lastAcceptedHeight uint64
 
-	chain           *coreth.ETHChain
+	chain           *eth.Ethereum
 	state           *chain.State
 	chaindb         ethdb.Database
 	metadataDB      database.Database
 	acceptedBlockDB database.Database
 	db              *versiondb.Database
-	atomicTrie      AtomicTrie
+	atomicBackend   AtomicBackend
 
 	client syncclient.Client
 
@@ -93,7 +93,7 @@ type StateSyncClient interface {
 // and monitor progress.
 // Error returns an error if any was encountered.
 type Syncer interface {
-	Start(ctx context.Context)
+	Start(ctx context.Context) error
 	Done() <-chan error
 }
 
@@ -274,25 +274,34 @@ func (client *stateSyncerClient) syncBlocks(ctx context.Context, fromHash common
 
 func (client *stateSyncerClient) syncAtomicTrie(ctx context.Context) error {
 	log.Info("atomic tx: sync starting", "root", client.syncSummary.AtomicRoot)
-	atomicSyncer := client.atomicTrie.Syncer(client.client, client.syncSummary.AtomicRoot, client.syncSummary.BlockNumber)
-	atomicSyncer.Start(ctx)
-	err := <-atomicSyncer.Done()
+	atomicSyncer, err := client.atomicBackend.Syncer(client.client, client.syncSummary.AtomicRoot, client.syncSummary.BlockNumber)
+	if err != nil {
+		return err
+	}
+	if err := atomicSyncer.Start(ctx); err != nil {
+		return err
+	}
+	err = <-atomicSyncer.Done()
 	log.Info("atomic tx: sync finished", "root", client.syncSummary.AtomicRoot, "err", err)
 	return err
 }
 
 func (client *stateSyncerClient) syncStateTrie(ctx context.Context) error {
 	log.Info("state sync: sync starting", "root", client.syncSummary.BlockRoot)
-	evmSyncer, err := statesync.NewEVMStateSyncer(&statesync.EVMStateSyncerConfig{
-		Client:    client.client,
-		Root:      client.syncSummary.BlockRoot,
-		BatchSize: ethdb.IdealBatchSize,
-		DB:        client.chaindb,
+	evmSyncer, err := statesync.NewStateSyncer(&statesync.StateSyncerConfig{
+		Client:                   client.client,
+		Root:                     client.syncSummary.BlockRoot,
+		BatchSize:                ethdb.IdealBatchSize,
+		DB:                       client.chaindb,
+		MaxOutstandingCodeHashes: statesync.DefaultMaxOutstandingCodeHashes,
+		NumCodeFetchingWorkers:   statesync.DefaultNumCodeFetchingWorkers,
 	})
 	if err != nil {
 		return err
 	}
-	evmSyncer.Start(ctx)
+	if err := evmSyncer.Start(ctx); err != nil {
+		return err
+	}
 	err = <-evmSyncer.Done()
 	log.Info("state sync: sync finished", "root", client.syncSummary.BlockRoot, "err", err)
 	return err
@@ -362,7 +371,7 @@ func (client *stateSyncerClient) finishSync() error {
 	// ApplyToSharedMemory does this, and even if the VM is stopped
 	// (gracefully or ungracefully), since MarkApplyToSharedMemoryCursor
 	// is called, VM will resume ApplyToSharedMemory on Initialize.
-	return client.atomicTrie.ApplyToSharedMemory(block.NumberU64())
+	return client.atomicBackend.ApplyToSharedMemory(block.NumberU64())
 }
 
 // updateVMMarkers updates the following markers in the VM's database
@@ -375,9 +384,10 @@ func (client *stateSyncerClient) updateVMMarkers() error {
 	// Mark the previously last accepted block for the shared memory cursor, so that we will execute shared
 	// memory operations from the previously last accepted block to [vm.syncSummary] when ApplyToSharedMemory
 	// is called.
-	if err := client.atomicTrie.MarkApplyToSharedMemoryCursor(client.lastAcceptedHeight); err != nil {
+	if err := client.atomicBackend.MarkApplyToSharedMemoryCursor(client.lastAcceptedHeight); err != nil {
 		return err
 	}
+	client.atomicBackend.SetLastAccepted(client.syncSummary.BlockHash)
 	if err := client.acceptedBlockDB.Put(lastAcceptedKey, client.syncSummary.BlockHash[:]); err != nil {
 		return err
 	}

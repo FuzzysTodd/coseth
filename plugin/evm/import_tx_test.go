@@ -399,7 +399,7 @@ func TestNewImportTx(t *testing.T) {
 		}
 
 		// Ensure that the call to EVMStateTransfer correctly updates the balance of [addr]
-		sdb, err := vm.chain.CurrentState()
+		sdb, err := vm.blockChain.State()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -409,7 +409,6 @@ func TestNewImportTx(t *testing.T) {
 		if actualBalance := sdb.GetBalance(addr); actualBalance.Cmp(expectedRemainingBalance) != 0 {
 			t.Fatalf("address remaining balance %s equal %s not %s", addr.String(), actualBalance, expectedRemainingBalance)
 		}
-
 	}
 	tests2 := map[string]atomicTxTest{
 		"apricot phase 0": {
@@ -1130,7 +1129,7 @@ func TestImportTxEVMStateTransfer(t *testing.T) {
 			checkState: func(t *testing.T, vm *VM) {
 				lastAcceptedBlock := vm.LastAcceptedBlockInternal().(*Block)
 
-				sdb, err := vm.chain.BlockState(lastAcceptedBlock.ethBlock)
+				sdb, err := vm.blockChain.StateAt(lastAcceptedBlock.ethBlock.Root())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1175,7 +1174,7 @@ func TestImportTxEVMStateTransfer(t *testing.T) {
 			checkState: func(t *testing.T, vm *VM) {
 				lastAcceptedBlock := vm.LastAcceptedBlockInternal().(*Block)
 
-				sdb, err := vm.chain.BlockState(lastAcceptedBlock.ethBlock)
+				sdb, err := vm.blockChain.StateAt(lastAcceptedBlock.ethBlock.Root())
 				if err != nil {
 					t.Fatal(err)
 				}
