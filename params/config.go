@@ -32,6 +32,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ava-labs/coreth/precompile"
+	"github.com/ava-labs/coreth/utils"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -50,78 +52,94 @@ var (
 var (
 	// AvalancheMainnetChainConfig is the configuration for Avalanche Main Network
 	AvalancheMainnetChainConfig = &ChainConfig{
-		ChainID:                     AvalancheMainnetChainID,
-		HomesteadBlock:              big.NewInt(0),
-		DAOForkBlock:                big.NewInt(0),
-		DAOForkSupport:              true,
-		EIP150Block:                 big.NewInt(0),
-		EIP150Hash:                  common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
-		EIP155Block:                 big.NewInt(0),
-		EIP158Block:                 big.NewInt(0),
-		ByzantiumBlock:              big.NewInt(0),
-		ConstantinopleBlock:         big.NewInt(0),
-		PetersburgBlock:             big.NewInt(0),
-		IstanbulBlock:               big.NewInt(0),
-		MuirGlacierBlock:            big.NewInt(0),
-		ApricotPhase1BlockTimestamp: big.NewInt(time.Date(2021, time.March, 31, 14, 0, 0, 0, time.UTC).Unix()),
-		ApricotPhase2BlockTimestamp: big.NewInt(time.Date(2021, time.May, 10, 11, 0, 0, 0, time.UTC).Unix()),
-		ApricotPhase3BlockTimestamp: big.NewInt(time.Date(2021, time.August, 24, 14, 0, 0, 0, time.UTC).Unix()),
-		ApricotPhase4BlockTimestamp: big.NewInt(time.Date(2021, time.September, 22, 21, 0, 0, 0, time.UTC).Unix()),
-		ApricotPhase5BlockTimestamp: big.NewInt(time.Date(2021, time.December, 2, 18, 0, 0, 0, time.UTC).Unix()),
+		ChainID:                         AvalancheMainnetChainID,
+		HomesteadBlock:                  big.NewInt(0),
+		DAOForkBlock:                    big.NewInt(0),
+		DAOForkSupport:                  true,
+		EIP150Block:                     big.NewInt(0),
+		EIP150Hash:                      common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
+		EIP155Block:                     big.NewInt(0),
+		EIP158Block:                     big.NewInt(0),
+		ByzantiumBlock:                  big.NewInt(0),
+		ConstantinopleBlock:             big.NewInt(0),
+		PetersburgBlock:                 big.NewInt(0),
+		IstanbulBlock:                   big.NewInt(0),
+		MuirGlacierBlock:                big.NewInt(0),
+		ApricotPhase1BlockTimestamp:     big.NewInt(time.Date(2021, time.March, 31, 14, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhase2BlockTimestamp:     big.NewInt(time.Date(2021, time.May, 10, 11, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhase3BlockTimestamp:     big.NewInt(time.Date(2021, time.August, 24, 14, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhase4BlockTimestamp:     big.NewInt(time.Date(2021, time.September, 22, 21, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhase5BlockTimestamp:     big.NewInt(time.Date(2021, time.December, 2, 18, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhasePre6BlockTimestamp:  big.NewInt(time.Date(2022, time.September, 5, 1, 30, 0, 0, time.UTC).Unix()),
+		ApricotPhase6BlockTimestamp:     big.NewInt(time.Date(2022, time.September, 6, 20, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhasePost6BlockTimestamp: big.NewInt(time.Date(2022, time.September, 7, 3, 0, 0, 0, time.UTC).Unix()),
+		// TODO Add Blueberry
 	}
 
 	// AvalancheFujiChainConfig is the configuration for the Fuji Test Network
 	AvalancheFujiChainConfig = &ChainConfig{
-		ChainID:                     AvalancheFujiChainID,
-		HomesteadBlock:              big.NewInt(0),
-		DAOForkBlock:                big.NewInt(0),
-		DAOForkSupport:              true,
-		EIP150Block:                 big.NewInt(0),
-		EIP150Hash:                  common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
-		EIP155Block:                 big.NewInt(0),
-		EIP158Block:                 big.NewInt(0),
-		ByzantiumBlock:              big.NewInt(0),
-		ConstantinopleBlock:         big.NewInt(0),
-		PetersburgBlock:             big.NewInt(0),
-		IstanbulBlock:               big.NewInt(0),
-		MuirGlacierBlock:            big.NewInt(0),
-		ApricotPhase1BlockTimestamp: big.NewInt(time.Date(2021, time.March, 26, 14, 0, 0, 0, time.UTC).Unix()),
-		ApricotPhase2BlockTimestamp: big.NewInt(time.Date(2021, time.May, 5, 14, 0, 0, 0, time.UTC).Unix()),
-		ApricotPhase3BlockTimestamp: big.NewInt(time.Date(2021, time.August, 16, 19, 0, 0, 0, time.UTC).Unix()),
-		ApricotPhase4BlockTimestamp: big.NewInt(time.Date(2021, time.September, 16, 21, 0, 0, 0, time.UTC).Unix()),
-		ApricotPhase5BlockTimestamp: big.NewInt(time.Date(2021, time.November, 24, 15, 0, 0, 0, time.UTC).Unix()),
+		ChainID:                         AvalancheFujiChainID,
+		HomesteadBlock:                  big.NewInt(0),
+		DAOForkBlock:                    big.NewInt(0),
+		DAOForkSupport:                  true,
+		EIP150Block:                     big.NewInt(0),
+		EIP150Hash:                      common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
+		EIP155Block:                     big.NewInt(0),
+		EIP158Block:                     big.NewInt(0),
+		ByzantiumBlock:                  big.NewInt(0),
+		ConstantinopleBlock:             big.NewInt(0),
+		PetersburgBlock:                 big.NewInt(0),
+		IstanbulBlock:                   big.NewInt(0),
+		MuirGlacierBlock:                big.NewInt(0),
+		ApricotPhase1BlockTimestamp:     big.NewInt(time.Date(2021, time.March, 26, 14, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhase2BlockTimestamp:     big.NewInt(time.Date(2021, time.May, 5, 14, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhase3BlockTimestamp:     big.NewInt(time.Date(2021, time.August, 16, 19, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhase4BlockTimestamp:     big.NewInt(time.Date(2021, time.September, 16, 21, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhase5BlockTimestamp:     big.NewInt(time.Date(2021, time.November, 24, 15, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhasePre6BlockTimestamp:  big.NewInt(time.Date(2022, time.September, 6, 20, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhase6BlockTimestamp:     big.NewInt(time.Date(2022, time.September, 6, 20, 0, 0, 0, time.UTC).Unix()),
+		ApricotPhasePost6BlockTimestamp: big.NewInt(time.Date(2022, time.September, 7, 6, 0, 0, 0, time.UTC).Unix()),
+		// TODO Add Blueberry
 	}
 
 	// AvalancheLocalChainConfig is the configuration for the Avalanche Local Network
 	AvalancheLocalChainConfig = &ChainConfig{
-		ChainID:                     AvalancheLocalChainID,
-		HomesteadBlock:              big.NewInt(0),
-		DAOForkBlock:                big.NewInt(0),
-		DAOForkSupport:              true,
-		EIP150Block:                 big.NewInt(0),
-		EIP150Hash:                  common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
-		EIP155Block:                 big.NewInt(0),
-		EIP158Block:                 big.NewInt(0),
-		ByzantiumBlock:              big.NewInt(0),
-		ConstantinopleBlock:         big.NewInt(0),
-		PetersburgBlock:             big.NewInt(0),
-		IstanbulBlock:               big.NewInt(0),
-		MuirGlacierBlock:            big.NewInt(0),
-		ApricotPhase1BlockTimestamp: big.NewInt(0),
-		ApricotPhase2BlockTimestamp: big.NewInt(0),
-		ApricotPhase3BlockTimestamp: big.NewInt(0),
-		ApricotPhase4BlockTimestamp: big.NewInt(0),
-		ApricotPhase5BlockTimestamp: big.NewInt(0),
+		ChainID:                         AvalancheLocalChainID,
+		HomesteadBlock:                  big.NewInt(0),
+		DAOForkBlock:                    big.NewInt(0),
+		DAOForkSupport:                  true,
+		EIP150Block:                     big.NewInt(0),
+		EIP150Hash:                      common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
+		EIP155Block:                     big.NewInt(0),
+		EIP158Block:                     big.NewInt(0),
+		ByzantiumBlock:                  big.NewInt(0),
+		ConstantinopleBlock:             big.NewInt(0),
+		PetersburgBlock:                 big.NewInt(0),
+		IstanbulBlock:                   big.NewInt(0),
+		MuirGlacierBlock:                big.NewInt(0),
+		ApricotPhase1BlockTimestamp:     big.NewInt(0),
+		ApricotPhase2BlockTimestamp:     big.NewInt(0),
+		ApricotPhase3BlockTimestamp:     big.NewInt(0),
+		ApricotPhase4BlockTimestamp:     big.NewInt(0),
+		ApricotPhase5BlockTimestamp:     big.NewInt(0),
+		ApricotPhasePre6BlockTimestamp:  big.NewInt(0),
+		ApricotPhase6BlockTimestamp:     big.NewInt(0),
+		ApricotPhasePost6BlockTimestamp: big.NewInt(0),
+		BlueberryBlockTimestamp:         big.NewInt(0),
 	}
 
-	TestChainConfig         = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0)}
-	TestLaunchConfig        = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil}
-	TestApricotPhase1Config = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil}
-	TestApricotPhase2Config = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil}
-	TestApricotPhase3Config = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil}
-	TestApricotPhase4Config = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil}
-	TestApricotPhase5Config = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0)}
-	TestRules               = TestChainConfig.AvalancheRules(new(big.Int), new(big.Int))
+	TestChainConfig             = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0)}
+	TestLaunchConfig            = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, nil, nil, nil, nil}
+	TestApricotPhase1Config     = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, nil, nil, nil}
+	TestApricotPhase2Config     = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, nil, nil}
+	TestApricotPhase3Config     = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, nil}
+	TestApricotPhase4Config     = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil}
+	TestApricotPhase5Config     = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil}
+	TestApricotPhasePre6Config  = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil}
+	TestApricotPhase6Config     = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil}
+	TestApricotPhasePost6Config = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil}
+	TestBlueberryChainConfig    = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0)}
+	TestRules                   = TestChainConfig.AvalancheRules(new(big.Int), new(big.Int))
 )
 
 // ChainConfig is the core config which determines the blockchain settings.
@@ -161,81 +179,104 @@ type ChainConfig struct {
 	ApricotPhase4BlockTimestamp *big.Int `json:"apricotPhase4BlockTimestamp,omitempty"`
 	// Apricot Phase 5 introduces a batch of atomic transactions with a maximum atomic gas limit per block. (nil = no fork, 0 = already activated)
 	ApricotPhase5BlockTimestamp *big.Int `json:"apricotPhase5BlockTimestamp,omitempty"`
+	// Apricot Phase Pre-6 deprecates the NativeAssetCall precompile (soft). (nil = no fork, 0 = already activated)
+	ApricotPhasePre6BlockTimestamp *big.Int `json:"apricotPhasePre6BlockTimestamp,omitempty"`
+	// Apricot Phase 6 deprecates the NativeAssetBalance and NativeAssetCall precompiles. (nil = no fork, 0 = already activated)
+	ApricotPhase6BlockTimestamp *big.Int `json:"apricotPhase6BlockTimestamp,omitempty"`
+	// Apricot Phase Post-6 deprecates the NativeAssetCall precompile (soft). (nil = no fork, 0 = already activated)
+	ApricotPhasePost6BlockTimestamp *big.Int `json:"apricotPhasePost6BlockTimestamp,omitempty"`
+	// Blueberry TODO comment. (nil = no fork, 0 = already activated)
+	BlueberryBlockTimestamp *big.Int `json:"blueberryBlockTimestamp,omitempty"`
 }
 
 // String implements the fmt.Stringer interface.
 func (c *ChainConfig) String() string {
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Apricot Phase 1: %v, Apricot Phase 2: %v, Apricot Phase 3: %v, Apricot Phase 4: %v, Apricot Phase 5: %v, Engine: Dummy Consensus Engine}",
-		c.ChainID,
-		c.HomesteadBlock,
-		c.DAOForkBlock,
-		c.DAOForkSupport,
-		c.EIP150Block,
-		c.EIP155Block,
-		c.EIP158Block,
-		c.ByzantiumBlock,
-		c.ConstantinopleBlock,
-		c.PetersburgBlock,
-		c.IstanbulBlock,
-		c.MuirGlacierBlock,
-		c.ApricotPhase1BlockTimestamp,
-		c.ApricotPhase2BlockTimestamp,
-		c.ApricotPhase3BlockTimestamp,
-		c.ApricotPhase4BlockTimestamp,
-		c.ApricotPhase5BlockTimestamp,
-	)
+	var banner string
+
+	banner += fmt.Sprintf("Chain ID:  %v\n", c.ChainID)
+	banner += "Consensus: Dummy Consensus Engine\n\n"
+
+	// Create a list of forks with a short description of them. Forks that only
+	// makes sense for mainnet should be optional at printing to avoid bloating
+	// the output for testnets and private networks.
+	banner += "Hard Forks:\n"
+	banner += fmt.Sprintf(" - Homestead:                   %-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/homestead.md)\n", c.HomesteadBlock)
+	if c.DAOForkBlock != nil {
+		banner += fmt.Sprintf(" - DAO Fork:                    %-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/dao-fork.md)\n", c.DAOForkBlock)
+	}
+	banner += fmt.Sprintf(" - Tangerine Whistle (EIP 150): %-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/tangerine-whistle.md)\n", c.EIP150Block)
+	banner += fmt.Sprintf(" - Spurious Dragon/1 (EIP 155): %-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/spurious-dragon.md)\n", c.EIP155Block)
+	banner += fmt.Sprintf(" - Spurious Dragon/2 (EIP 158): %-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/spurious-dragon.md)\n", c.EIP155Block)
+	banner += fmt.Sprintf(" - Byzantium:                   %-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/byzantium.md)\n", c.ByzantiumBlock)
+	banner += fmt.Sprintf(" - Constantinople:              %-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/constantinople.md)\n", c.ConstantinopleBlock)
+	banner += fmt.Sprintf(" - Petersburg:                  %-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/petersburg.md)\n", c.PetersburgBlock)
+	banner += fmt.Sprintf(" - Istanbul:                    %-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/istanbul.md)\n", c.IstanbulBlock)
+	if c.MuirGlacierBlock != nil {
+		banner += fmt.Sprintf(" - Muir Glacier:                %-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/muir-glacier.md)\n", c.MuirGlacierBlock)
+	}
+	banner += fmt.Sprintf(" - Apricot Phase 1 Timestamp:   %-8v (https://github.com/ava-labs/avalanchego/releases/tag/v1.3.0)\n", c.ApricotPhase1BlockTimestamp)
+	banner += fmt.Sprintf(" - Apricot Phase 2 Timestamp:   %-8v (https://github.com/ava-labs/avalanchego/releases/tag/v1.4.0)\n", c.ApricotPhase2BlockTimestamp)
+	banner += fmt.Sprintf(" - Apricot Phase 3 Timestamp:   %-8v (https://github.com/ava-labs/avalanchego/releases/tag/v1.5.0)\n", c.ApricotPhase3BlockTimestamp)
+	banner += fmt.Sprintf(" - Apricot Phase 4 Timestamp:   %-8v (https://github.com/ava-labs/avalanchego/releases/tag/v1.6.0)\n", c.ApricotPhase4BlockTimestamp)
+	banner += fmt.Sprintf(" - Apricot Phase 5 Timestamp:   %-8v (https://github.com/ava-labs/avalanchego/releases/tag/v1.7.0)\n", c.ApricotPhase5BlockTimestamp)
+	banner += fmt.Sprintf(" - Apricot Phase P6 Timestamp   %-8v (https://github.com/ava-labs/avalanchego/releases/tag/v1.8.0)\n", c.ApricotPhasePre6BlockTimestamp)
+	banner += fmt.Sprintf(" - Apricot Phase 6 Timestamp:   %-8v (https://github.com/ava-labs/avalanchego/releases/tag/v1.8.0)\n", c.ApricotPhase6BlockTimestamp)
+	banner += fmt.Sprintf(" - Apricot Phase Post-6 Timestamp:   %-8v (https://github.com/ava-labs/avalanchego/releases/tag/v1.8.0\n", c.ApricotPhasePost6BlockTimestamp)
+	banner += fmt.Sprintf(" - Blueberry Timestamp:          %-8v (https://github.com/ava-labs/avalanchego/releases/tag/v1.10.0)\n", c.BlueberryBlockTimestamp)
+	banner += "\n"
+	return banner
 }
 
 // IsHomestead returns whether num is either equal to the homestead block or greater.
 func (c *ChainConfig) IsHomestead(num *big.Int) bool {
-	return isForked(c.HomesteadBlock, num)
+	return utils.IsForked(c.HomesteadBlock, num)
 }
 
 // IsDAOFork returns whether num is either equal to the DAO fork block or greater.
 func (c *ChainConfig) IsDAOFork(num *big.Int) bool {
-	return isForked(c.DAOForkBlock, num)
+	return utils.IsForked(c.DAOForkBlock, num)
 }
 
 // IsEIP150 returns whether num is either equal to the EIP150 fork block or greater.
 func (c *ChainConfig) IsEIP150(num *big.Int) bool {
-	return isForked(c.EIP150Block, num)
+	return utils.IsForked(c.EIP150Block, num)
 }
 
 // IsEIP155 returns whether num is either equal to the EIP155 fork block or greater.
 func (c *ChainConfig) IsEIP155(num *big.Int) bool {
-	return isForked(c.EIP155Block, num)
+	return utils.IsForked(c.EIP155Block, num)
 }
 
 // IsEIP158 returns whether num is either equal to the EIP158 fork block or greater.
 func (c *ChainConfig) IsEIP158(num *big.Int) bool {
-	return isForked(c.EIP158Block, num)
+	return utils.IsForked(c.EIP158Block, num)
 }
 
 // IsByzantium returns whether num is either equal to the Byzantium fork block or greater.
 func (c *ChainConfig) IsByzantium(num *big.Int) bool {
-	return isForked(c.ByzantiumBlock, num)
+	return utils.IsForked(c.ByzantiumBlock, num)
 }
 
 // IsConstantinople returns whether num is either equal to the Constantinople fork block or greater.
 func (c *ChainConfig) IsConstantinople(num *big.Int) bool {
-	return isForked(c.ConstantinopleBlock, num)
+	return utils.IsForked(c.ConstantinopleBlock, num)
 }
 
 // IsMuirGlacier returns whether num is either equal to the Muir Glacier (EIP-2384) fork block or greater.
 func (c *ChainConfig) IsMuirGlacier(num *big.Int) bool {
-	return isForked(c.MuirGlacierBlock, num)
+	return utils.IsForked(c.MuirGlacierBlock, num)
 }
 
 // IsPetersburg returns whether num is either
 // - equal to or greater than the PetersburgBlock fork block,
 // - OR is nil, and Constantinople is active
 func (c *ChainConfig) IsPetersburg(num *big.Int) bool {
-	return isForked(c.PetersburgBlock, num) || c.PetersburgBlock == nil && isForked(c.ConstantinopleBlock, num)
+	return utils.IsForked(c.PetersburgBlock, num) || c.PetersburgBlock == nil && utils.IsForked(c.ConstantinopleBlock, num)
 }
 
 // IsIstanbul returns whether num is either equal to the Istanbul fork block or greater.
 func (c *ChainConfig) IsIstanbul(num *big.Int) bool {
-	return isForked(c.IstanbulBlock, num)
+	return utils.IsForked(c.IstanbulBlock, num)
 }
 
 // Avalanche Upgrades:
@@ -243,31 +284,55 @@ func (c *ChainConfig) IsIstanbul(num *big.Int) bool {
 // IsApricotPhase1 returns whether [blockTimestamp] represents a block
 // with a timestamp after the Apricot Phase 1 upgrade time.
 func (c *ChainConfig) IsApricotPhase1(blockTimestamp *big.Int) bool {
-	return isForked(c.ApricotPhase1BlockTimestamp, blockTimestamp)
+	return utils.IsForked(c.ApricotPhase1BlockTimestamp, blockTimestamp)
 }
 
 // IsApricotPhase2 returns whether [blockTimestamp] represents a block
 // with a timestamp after the Apricot Phase 2 upgrade time.
 func (c *ChainConfig) IsApricotPhase2(blockTimestamp *big.Int) bool {
-	return isForked(c.ApricotPhase2BlockTimestamp, blockTimestamp)
+	return utils.IsForked(c.ApricotPhase2BlockTimestamp, blockTimestamp)
 }
 
 // IsApricotPhase3 returns whether [blockTimestamp] represents a block
 // with a timestamp after the Apricot Phase 3 upgrade time.
 func (c *ChainConfig) IsApricotPhase3(blockTimestamp *big.Int) bool {
-	return isForked(c.ApricotPhase3BlockTimestamp, blockTimestamp)
+	return utils.IsForked(c.ApricotPhase3BlockTimestamp, blockTimestamp)
 }
 
 // IsApricotPhase4 returns whether [blockTimestamp] represents a block
 // with a timestamp after the Apricot Phase 4 upgrade time.
 func (c *ChainConfig) IsApricotPhase4(blockTimestamp *big.Int) bool {
-	return isForked(c.ApricotPhase4BlockTimestamp, blockTimestamp)
+	return utils.IsForked(c.ApricotPhase4BlockTimestamp, blockTimestamp)
 }
 
 // IsApricotPhase5 returns whether [blockTimestamp] represents a block
 // with a timestamp after the Apricot Phase 5 upgrade time.
 func (c *ChainConfig) IsApricotPhase5(blockTimestamp *big.Int) bool {
-	return isForked(c.ApricotPhase5BlockTimestamp, blockTimestamp)
+	return utils.IsForked(c.ApricotPhase5BlockTimestamp, blockTimestamp)
+}
+
+// IsApricotPhasePre6 returns whether [blockTimestamp] represents a block
+// with a timestamp after the Apricot Phase Pre 6 upgrade time.
+func (c *ChainConfig) IsApricotPhasePre6(blockTimestamp *big.Int) bool {
+	return utils.IsForked(c.ApricotPhasePre6BlockTimestamp, blockTimestamp)
+}
+
+// IsApricotPhase6 returns whether [blockTimestamp] represents a block
+// with a timestamp after the Apricot Phase 6 upgrade time.
+func (c *ChainConfig) IsApricotPhase6(blockTimestamp *big.Int) bool {
+	return utils.IsForked(c.ApricotPhase6BlockTimestamp, blockTimestamp)
+}
+
+// IsApricotPhasePost6 returns whether [blockTimestamp] represents a block
+// with a timestamp after the Apricot Phase 6 Post upgrade time.
+func (c *ChainConfig) IsApricotPhasePost6(blockTimestamp *big.Int) bool {
+	return utils.IsForked(c.ApricotPhasePost6BlockTimestamp, blockTimestamp)
+}
+
+// IsBlueberry returns whether [blockTimestamp] represents a block
+// with a timestamp after the Blueberry upgrade time.
+func (c *ChainConfig) IsBlueberry(blockTimestamp *big.Int) bool {
+	return utils.IsForked(c.BlueberryBlockTimestamp, blockTimestamp)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -344,6 +409,10 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "apricotPhase2BlockTimestamp", block: c.ApricotPhase2BlockTimestamp},
 		{name: "apricotPhase3BlockTimestamp", block: c.ApricotPhase3BlockTimestamp},
 		{name: "apricotPhase4BlockTimestamp", block: c.ApricotPhase4BlockTimestamp},
+		{name: "apricotPhase5BlockTimestamp", block: c.ApricotPhase5BlockTimestamp},
+		{name: "apricotPhasePre6BlockTimestamp", block: c.ApricotPhasePre6BlockTimestamp},
+		{name: "apricotPhase6BlockTimestamp", block: c.ApricotPhase6BlockTimestamp},
+		{name: "apricotPhasePost6BlockTimestamp", block: c.ApricotPhasePost6BlockTimestamp},
 	} {
 		if lastFork.name != "" {
 			// Next one must be higher number
@@ -426,22 +495,23 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headHeight *big.Int, 
 	if isForkIncompatible(c.ApricotPhase5BlockTimestamp, newcfg.ApricotPhase5BlockTimestamp, headTimestamp) {
 		return newCompatError("ApricotPhase5 fork block timestamp", c.ApricotPhase5BlockTimestamp, newcfg.ApricotPhase5BlockTimestamp)
 	}
+	if isForkIncompatible(c.ApricotPhasePre6BlockTimestamp, newcfg.ApricotPhasePre6BlockTimestamp, headTimestamp) {
+		return newCompatError("ApricotPhasePre6 fork block timestamp", c.ApricotPhasePre6BlockTimestamp, newcfg.ApricotPhasePre6BlockTimestamp)
+	}
+	if isForkIncompatible(c.ApricotPhase6BlockTimestamp, newcfg.ApricotPhase6BlockTimestamp, headTimestamp) {
+		return newCompatError("ApricotPhase6 fork block timestamp", c.ApricotPhase6BlockTimestamp, newcfg.ApricotPhase6BlockTimestamp)
+	}
 
+	if isForkIncompatible(c.BlueberryBlockTimestamp, newcfg.BlueberryBlockTimestamp, headTimestamp) {
+		return newCompatError("Blueberry fork block timestamp", c.BlueberryBlockTimestamp, newcfg.BlueberryBlockTimestamp)
+	}
 	return nil
 }
 
 // isForkIncompatible returns true if a fork scheduled at s1 cannot be rescheduled to
 // block s2 because head is already past the fork.
 func isForkIncompatible(s1, s2, head *big.Int) bool {
-	return (isForked(s1, head) || isForked(s2, head)) && !configNumEqual(s1, s2)
-}
-
-// isForked returns whether a fork scheduled at block s is active at the given head block.
-func isForked(s, head *big.Int) bool {
-	if s == nil || head == nil {
-		return false
-	}
-	return s.Cmp(head) <= 0
+	return (utils.IsForked(s1, head) || utils.IsForked(s2, head)) && !configNumEqual(s1, s2)
 }
 
 func configNumEqual(x, y *big.Int) bool {
@@ -497,6 +567,14 @@ type Rules struct {
 
 	// Rules for Avalanche releases
 	IsApricotPhase1, IsApricotPhase2, IsApricotPhase3, IsApricotPhase4, IsApricotPhase5 bool
+	IsApricotPhasePre6, IsApricotPhase6, IsApricotPhasePost6                            bool
+	IsBlueberry                                                                         bool
+
+	// Precompiles maps addresses to stateful precompiled contracts that are enabled
+	// for this rule set.
+	// Note: none of these addresses should conflict with the address space used by
+	// any existing precompiles.
+	Precompiles map[common.Address]precompile.StatefulPrecompiledContract
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -528,5 +606,41 @@ func (c *ChainConfig) AvalancheRules(blockNum, blockTimestamp *big.Int) Rules {
 	rules.IsApricotPhase3 = c.IsApricotPhase3(blockTimestamp)
 	rules.IsApricotPhase4 = c.IsApricotPhase4(blockTimestamp)
 	rules.IsApricotPhase5 = c.IsApricotPhase5(blockTimestamp)
+	rules.IsApricotPhasePre6 = c.IsApricotPhasePre6(blockTimestamp)
+	rules.IsApricotPhase6 = c.IsApricotPhase6(blockTimestamp)
+	rules.IsApricotPhasePost6 = c.IsApricotPhasePost6(blockTimestamp)
+	rules.IsBlueberry = c.IsBlueberry(blockTimestamp)
+
+	// Initialize the stateful precompiles that should be enabled at [blockTimestamp].
+	rules.Precompiles = make(map[common.Address]precompile.StatefulPrecompiledContract)
+	for _, config := range c.enabledStatefulPrecompiles() {
+		if utils.IsForked(config.Timestamp(), blockTimestamp) {
+			rules.Precompiles[config.Address()] = config.Contract()
+		}
+	}
+
 	return rules
+}
+
+// enabledStatefulPrecompiles returns a list of stateful precompile configs in the order that they are enabled
+// by block timestamp.
+// Note: the return value does not include the native precompiles [nativeAssetCall] and [nativeAssetBalance].
+// These are handled in [evm.precompile] directly.
+func (c *ChainConfig) enabledStatefulPrecompiles() []precompile.StatefulPrecompileConfig {
+	statefulPrecompileConfigs := make([]precompile.StatefulPrecompileConfig, 0)
+
+	return statefulPrecompileConfigs
+}
+
+// CheckConfigurePrecompiles checks if any of the precompiles specified in the chain config are enabled by the block
+// transition from [parentTimestamp] to the timestamp set in [blockContext]. If this is the case, it calls [Configure]
+// to apply the necessary state transitions for the upgrade.
+// This function is called:
+// - within genesis setup to configure the starting state for precompiles enabled at genesis,
+// - during block processing to update the state before processing the given block.
+func (c *ChainConfig) CheckConfigurePrecompiles(parentTimestamp *big.Int, blockContext precompile.BlockContext, statedb precompile.StateDB) {
+	// Iterate the enabled stateful precompiles and configure them if needed
+	for _, config := range c.enabledStatefulPrecompiles() {
+		precompile.CheckConfigure(c, parentTimestamp, blockContext, config, statedb)
+	}
 }

@@ -79,6 +79,7 @@ type Client interface {
 	TransactionCount(context.Context, common.Hash) (uint, error)
 	TransactionInBlock(context.Context, common.Hash, uint) (*types.Transaction, error)
 	TransactionReceipt(context.Context, common.Hash) (*types.Receipt, error)
+	SyncProgress(ctx context.Context) error
 	SubscribeNewAcceptedTransactions(context.Context, chan<- *common.Hash) (interfaces.Subscription, error)
 	SubscribeNewPendingTransactions(context.Context, chan<- *common.Hash) (interfaces.Subscription, error)
 	SubscribeNewHead(context.Context, chan<- *types.Header) (interfaces.Subscription, error)
@@ -97,6 +98,7 @@ type Client interface {
 	CallContractAtHash(ctx context.Context, msg interfaces.CallMsg, blockHash common.Hash) ([]byte, error)
 	SuggestGasPrice(context.Context) (*big.Int, error)
 	SuggestGasTipCap(context.Context) (*big.Int, error)
+	FeeHistory(ctx context.Context, blockCount uint64, lastBlock *big.Int, rewardPercentiles []float64) (*interfaces.FeeHistory, error)
 	EstimateGas(context.Context, interfaces.CallMsg) (uint64, error)
 	EstimateBaseFee(context.Context) (*big.Int, error)
 	SendTransaction(context.Context, *types.Transaction) error
@@ -359,6 +361,24 @@ func (ec *client) TransactionReceipt(ctx context.Context, txHash common.Hash) (*
 	return r, err
 }
 
+// SyncProgress retrieves the current progress of the sync algorithm. If there's
+// no sync currently running, it returns nil.
+func (ec *client) SyncProgress(ctx context.Context) error {
+	var (
+		raw     json.RawMessage
+		syncing bool
+	)
+
+	if err := ec.c.CallContext(ctx, &raw, "eth_syncing"); err != nil {
+		return err
+	}
+	// If not syncing, the response will be 'false'. To detect this
+	// we unmarshal into a boolean and return nil on success.
+	// If the chain is syncing, the engine will not forward the
+	// request to the chain and a non-nil err will be returned.
+	return json.Unmarshal(raw, &syncing)
+}
+
 // SubscribeNewAcceptedTransactions subscribes to notifications about the accepted transaction hashes on the given channel.
 func (ec *client) SubscribeNewAcceptedTransactions(ctx context.Context, ch chan<- *common.Hash) (interfaces.Subscription, error) {
 	return ec.c.EthSubscribe(ctx, ch, "newAcceptedTransactions")
@@ -536,6 +556,38 @@ func (ec *client) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
 		return nil, err
 	}
 	return (*big.Int)(&hex), nil
+}
+
+type feeHistoryResultMarshaling struct {
+	OldestBlock  *hexutil.Big     `json:"oldestBlock"`
+	Reward       [][]*hexutil.Big `json:"reward,omitempty"`
+	BaseFee      []*hexutil.Big   `json:"baseFeePerGas,omitempty"`
+	GasUsedRatio []float64        `json:"gasUsedRatio"`
+}
+
+// FeeHistory retrieves the fee market history.
+func (ec *client) FeeHistory(ctx context.Context, blockCount uint64, lastBlock *big.Int, rewardPercentiles []float64) (*interfaces.FeeHistory, error) {
+	var res feeHistoryResultMarshaling
+	if err := ec.c.CallContext(ctx, &res, "eth_feeHistory", hexutil.Uint(blockCount), ToBlockNumArg(lastBlock), rewardPercentiles); err != nil {
+		return nil, err
+	}
+	reward := make([][]*big.Int, len(res.Reward))
+	for i, r := range res.Reward {
+		reward[i] = make([]*big.Int, len(r))
+		for j, r := range r {
+			reward[i][j] = (*big.Int)(r)
+		}
+	}
+	baseFee := make([]*big.Int, len(res.BaseFee))
+	for i, b := range res.BaseFee {
+		baseFee[i] = (*big.Int)(b)
+	}
+	return &interfaces.FeeHistory{
+		OldestBlock:  (*big.Int)(res.OldestBlock),
+		Reward:       reward,
+		BaseFee:      baseFee,
+		GasUsedRatio: res.GasUsedRatio,
+	}, nil
 }
 
 // EstimateGas tries to estimate the gas needed to execute a specific transaction based on
