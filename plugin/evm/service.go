@@ -51,7 +51,7 @@ type GetAcceptedFrontReply struct {
 
 // GetAcceptedFront returns the last accepted block's hash and height
 func (api *SnowmanAPI) GetAcceptedFront(ctx context.Context) (*GetAcceptedFrontReply, error) {
-	blk := api.vm.chain.LastConsensusAcceptedBlock()
+	blk := api.vm.blockChain.LastConsensusAcceptedBlock()
 	return &GetAcceptedFrontReply{
 		Hash:   blk.Hash(),
 		Number: blk.Number(),
@@ -328,7 +328,7 @@ func (service *AvaxAPI) Export(_ *http.Request, args *ExportArgs, response *api.
 
 // GetUTXOs gets all utxos for passed in addresses
 func (service *AvaxAPI) GetUTXOs(r *http.Request, args *api.GetUTXOsArgs, reply *api.GetUTXOsReply) error {
-	service.vm.ctx.Log.Info("EVM: GetUTXOs called for with %s", args.Addresses)
+	log.Info("EVM: GetUTXOs called", "Addresses", args.Addresses)
 
 	if len(args.Addresses) == 0 {
 		return errNoAddresses
@@ -386,7 +386,7 @@ func (service *AvaxAPI) GetUTXOs(r *http.Request, args *api.GetUTXOsArgs, reply 
 		if err != nil {
 			return fmt.Errorf("problem marshalling UTXO: %w", err)
 		}
-		str, err := formatting.EncodeWithChecksum(args.Encoding, b)
+		str, err := formatting.Encode(args.Encoding, b)
 		if err != nil {
 			return fmt.Errorf("problem encoding utxo: %w", err)
 		}
@@ -472,7 +472,7 @@ func (service *AvaxAPI) GetAtomicTx(r *http.Request, args *api.GetTxArgs, reply 
 		return fmt.Errorf("could not find tx %s", args.TxID)
 	}
 
-	txBytes, err := formatting.EncodeWithChecksum(args.Encoding, tx.Bytes())
+	txBytes, err := formatting.Encode(args.Encoding, tx.SignedBytes())
 	if err != nil {
 		return err
 	}

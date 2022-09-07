@@ -24,8 +24,8 @@ import (
 	"github.com/ava-labs/avalanchego/utils/units"
 
 	"github.com/ava-labs/coreth/accounts/keystore"
-	coreth "github.com/ava-labs/coreth/chain"
 	"github.com/ava-labs/coreth/consensus/dummy"
+	"github.com/ava-labs/coreth/constants"
 	"github.com/ava-labs/coreth/core"
 	"github.com/ava-labs/coreth/core/rawdb"
 	"github.com/ava-labs/coreth/core/types"
@@ -124,13 +124,12 @@ func TestStateSyncToggleEnabledToDisabled(t *testing.T) {
 		return nil
 	}
 	// Disable metrics to prevent duplicate registerer
-	configJSON := "{\"metrics-enabled\":false}"
 	if err := syncDisabledVM.Initialize(
 		vmSetup.syncerVM.ctx,
 		vmSetup.syncerDBManager,
-		[]byte(genesisJSONApricotPhase5),
+		[]byte(genesisJSONLatest),
 		nil,
-		[]byte(configJSON),
+		nil,
 		vmSetup.syncerVM.toEngine,
 		[]*commonEng.Fx{},
 		appSender,
@@ -154,7 +153,7 @@ func TestStateSyncToggleEnabledToDisabled(t *testing.T) {
 
 	// Process the first 10 blocks from the serverVM
 	for i := uint64(1); i < 10; i++ {
-		ethBlock := vmSetup.serverVM.chain.GetBlockByNumber(i)
+		ethBlock := vmSetup.serverVM.blockChain.GetBlockByNumber(i)
 		if ethBlock == nil {
 			t.Fatalf("VM Server did not have a block available at height %d", i)
 		}
@@ -174,22 +173,23 @@ func TestStateSyncToggleEnabledToDisabled(t *testing.T) {
 		}
 	}
 	// Verify the snapshot disk layer matches the last block root
-	lastRoot := syncDisabledVM.chain.BlockChain().CurrentBlock().Root()
-	if err := syncDisabledVM.chain.BlockChain().Snapshots().Verify(lastRoot); err != nil {
+	lastRoot := syncDisabledVM.blockChain.CurrentBlock().Root()
+	if err := syncDisabledVM.blockChain.Snapshots().Verify(lastRoot); err != nil {
 		t.Fatal(err)
 	}
+	syncDisabledVM.blockChain.DrainAcceptorQueue()
 
 	// Create a new VM from the same database with state sync enabled.
 	syncReEnabledVM := &VM{}
-	// Disable metrics to prevent duplicate registerer
-	configJSON = fmt.Sprintf(
-		"{\"metrics-enabled\":false, \"state-sync-enabled\":true, \"state-sync-min-blocks\":%d}",
+	// Enable state sync in configJSON
+	configJSON := fmt.Sprintf(
+		"{\"state-sync-enabled\":true, \"state-sync-min-blocks\":%d}",
 		test.stateSyncMinBlocks,
 	)
 	if err := syncReEnabledVM.Initialize(
 		vmSetup.syncerVM.ctx,
 		vmSetup.syncerDBManager,
-		[]byte(genesisJSONApricotPhase5),
+		[]byte(genesisJSONLatest),
 		nil,
 		[]byte(configJSON),
 		vmSetup.syncerVM.toEngine,
@@ -253,7 +253,7 @@ func createSyncServerAndClientVMs(t *testing.T, test syncTest) *syncVMSetup {
 	_, serverVM, _, serverAtomicMemory, serverAppSender := GenesisVMWithUTXOs(
 		t,
 		true,
-		genesisJSONApricotPhase5,
+		"",
 		"",
 		"",
 		map[ids.ShortID]uint64{
@@ -303,11 +303,12 @@ func createSyncServerAndClientVMs(t *testing.T, test syncTest) *syncVMSetup {
 		}
 	})
 
-	// override atomicTrie's commitHeightInterval so the call to [atomicTrie.Index]
+	// override serverAtomicTrie's commitInterval so the call to [serverAtomicTrie.Index]
 	// creates a commit at the height [syncableInterval]. This is necessary to support
 	// fetching a state summary.
-	serverVM.atomicTrie.(*atomicTrie).commitHeightInterval = test.syncableInterval
-	assert.NoError(t, serverVM.atomicTrie.Index(test.syncableInterval, nil))
+	serverAtomicTrie := serverVM.atomicTrie.(*atomicTrie)
+	serverAtomicTrie.commitInterval = test.syncableInterval
+	assert.NoError(t, serverAtomicTrie.commit(test.syncableInterval, serverAtomicTrie.LastAcceptedRoot()))
 	assert.NoError(t, serverVM.db.Commit())
 
 	serverSharedMemories := newSharedMemories(serverAtomicMemory, serverVM.ctx.ChainID, serverVM.ctx.XChainID)
@@ -321,7 +322,7 @@ func createSyncServerAndClientVMs(t *testing.T, test syncTest) *syncVMSetup {
 	// patch serverVM's lastAcceptedBlock to have the new root
 	// and update the vm's state so the trie with accounts will
 	// be returned by StateSyncGetLastSummary
-	lastAccepted := serverVM.chain.LastAcceptedBlock()
+	lastAccepted := serverVM.blockChain.LastAcceptedBlock()
 	patchedBlock := patchBlock(lastAccepted, root, serverVM.chaindb)
 	blockBytes, err := rlp.EncodeToBytes(patchedBlock)
 	if err != nil {
@@ -342,7 +343,7 @@ func createSyncServerAndClientVMs(t *testing.T, test syncTest) *syncVMSetup {
 	syncerEngineChan, syncerVM, syncerDBManager, syncerAtomicMemory, syncerAppSender := GenesisVMWithUTXOs(
 		t,
 		false,
-		genesisJSONApricotPhase5,
+		"",
 		stateSyncEnabledJSON,
 		"",
 		map[ids.ShortID]uint64{
@@ -355,6 +356,9 @@ func createSyncServerAndClientVMs(t *testing.T, test syncTest) *syncVMSetup {
 	enabled, err := syncerVM.StateSyncEnabled()
 	assert.NoError(t, err)
 	assert.True(t, enabled)
+
+	// override [syncerVM]'s commit interval so the atomic trie works correctly.
+	syncerVM.atomicTrie.(*atomicTrie).commitInterval = test.syncableInterval
 
 	// override [serverVM]'s SendAppResponse function to trigger AppResponse on [syncerVM]
 	serverAppSender.SendAppResponseF = func(nodeID ids.NodeID, requestID uint32, response []byte) error {
@@ -427,6 +431,7 @@ type syncTest struct {
 }
 
 func testSyncerVM(t *testing.T, vmSetup *syncVMSetup, test syncTest) {
+	t.Helper()
 	var (
 		serverVM           = vmSetup.serverVM
 		includedAtomicTxs  = vmSetup.includedAtomicTxs
@@ -481,7 +486,7 @@ func testSyncerVM(t *testing.T, vmSetup *syncVMSetup, test syncTest) {
 	}
 	assert.Equal(t, serverVM.LastAcceptedBlock().Height(), syncerVM.LastAcceptedBlock().Height(), "block height mismatch between syncer and server")
 	assert.Equal(t, serverVM.LastAcceptedBlock().ID(), syncerVM.LastAcceptedBlock().ID(), "blockID mismatch between syncer and server")
-	assert.True(t, syncerVM.chain.BlockChain().HasState(syncerVM.chain.LastAcceptedBlock().Root()), "unavailable state for last accepted block")
+	assert.True(t, syncerVM.blockChain.HasState(syncerVM.blockChain.LastAcceptedBlock().Root()), "unavailable state for last accepted block")
 
 	blocksToBuild := 10
 	txsPerBlock := 10
@@ -574,19 +579,19 @@ func generateAndAcceptBlocks(t *testing.T, vm *VM, numBlocks int, gen func(int, 
 	}
 	_, _, err := core.GenerateChain(
 		vm.chainConfig,
-		vm.chain.LastAcceptedBlock(),
+		vm.blockChain.LastAcceptedBlock(),
 		dummy.NewDummyEngine(vm.createConsensusCallbacks()),
 		vm.chaindb,
 		numBlocks,
 		10,
 		func(i int, g *core.BlockGen) {
 			g.SetOnBlockGenerated(acceptExternalBlock)
-			g.SetCoinbase(coreth.BlackholeAddr) // necessary for syntactic validation of the block
+			g.SetCoinbase(constants.BlackholeAddr) // necessary for syntactic validation of the block
 			gen(i, g)
 		},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	vm.chain.BlockChain().DrainAcceptorQueue()
+	vm.blockChain.DrainAcceptorQueue()
 }
