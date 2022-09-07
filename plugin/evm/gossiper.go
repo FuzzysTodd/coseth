@@ -71,11 +71,12 @@ type pushGossiper struct {
 	recentEthTxs    *cache.LRU
 
 	codec codec.Manager
+	stats GossipSentStats
 }
 
 // createGossiper constructs and returns a pushGossiper or noopGossiper
 // based on whether vm.chainConfig.ApricotPhase4BlockTimestamp is set
-func (vm *VM) createGossiper() Gossiper {
+func (vm *VM) createGossiper(stats GossipStats) Gossiper {
 	if vm.chainConfig.ApricotPhase4BlockTimestamp == nil {
 		return &noopGossiper{}
 	}
@@ -85,8 +86,8 @@ func (vm *VM) createGossiper() Gossiper {
 		gossipActivationTime: time.Unix(vm.chainConfig.ApricotPhase4BlockTimestamp.Int64(), 0),
 		config:               vm.config,
 		client:               vm.client,
-		blockchain:           vm.chain.BlockChain(),
-		txPool:               vm.chain.GetTxPool(),
+		blockchain:           vm.blockChain,
+		txPool:               vm.txPool,
 		atomicMempool:        vm.mempool,
 		ethTxsToGossipChan:   make(chan []*types.Transaction),
 		ethTxsToGossip:       make(map[common.Hash]*types.Transaction),
@@ -95,6 +96,7 @@ func (vm *VM) createGossiper() Gossiper {
 		recentAtomicTxs:      &cache.LRU{Size: recentCacheSize},
 		recentEthTxs:         &cache.LRU{Size: recentCacheSize},
 		codec:                vm.networkCodec,
+		stats:                stats,
 	}
 	net.awaitEthTxGossip()
 	return net
@@ -198,10 +200,17 @@ func (n *pushGossiper) queueRegossipTxs() types.Transactions {
 	}
 	localQueued := n.queueExecutableTxs(state, tip.BaseFee(), localTxs, n.config.TxRegossipMaxSize)
 	localCount := len(localQueued)
+	n.stats.IncEthTxsRegossipQueuedLocal(localCount)
 	if localCount >= n.config.TxRegossipMaxSize {
+		n.stats.IncEthTxsRegossipQueued()
 		return localQueued
 	}
 	remoteQueued := n.queueExecutableTxs(state, tip.BaseFee(), remoteTxs, n.config.TxRegossipMaxSize-localCount)
+	n.stats.IncEthTxsRegossipQueuedRemote(len(remoteQueued))
+	if localCount+len(remoteQueued) > 0 {
+		// only increment the regossip stat when there are any txs queued
+		n.stats.IncEthTxsRegossipQueued()
+	}
 	return append(localQueued, remoteQueued...)
 }
 
@@ -286,7 +295,7 @@ func (n *pushGossiper) gossipAtomicTx(tx *Tx) error {
 	n.recentAtomicTxs.Put(txID, nil)
 
 	msg := message.AtomicTxGossip{
-		Tx: tx.Bytes(),
+		Tx: tx.SignedBytes(),
 	}
 	msgBytes, err := message.BuildGossipMessage(n.codec, msg)
 	if err != nil {
@@ -297,6 +306,7 @@ func (n *pushGossiper) gossipAtomicTx(tx *Tx) error {
 		"gossiping atomic tx",
 		"txID", txID,
 	)
+	n.stats.IncAtomicGossipSent()
 	return n.client.Gossip(msgBytes)
 }
 
@@ -322,6 +332,7 @@ func (n *pushGossiper) sendEthTxs(txs []*types.Transaction) error {
 		"len(txs)", len(txs),
 		"size(txs)", len(msg.Txs),
 	)
+	n.stats.IncEthTxsGossipSent()
 	return n.client.Gossip(msgBytes)
 }
 
@@ -411,13 +422,15 @@ type GossipHandler struct {
 	vm            *VM
 	atomicMempool *Mempool
 	txPool        *core.TxPool
+	stats         GossipReceivedStats
 }
 
-func NewGossipHandler(vm *VM) *GossipHandler {
+func NewGossipHandler(vm *VM, stats GossipReceivedStats) *GossipHandler {
 	return &GossipHandler{
 		vm:            vm,
 		atomicMempool: vm.mempool,
-		txPool:        vm.chain.GetTxPool(),
+		txPool:        vm.txPool,
+		stats:         stats,
 	}
 }
 
@@ -456,10 +469,16 @@ func (h *GossipHandler) HandleAtomicTx(nodeID ids.NodeID, msg message.AtomicTxGo
 	tx.Initialize(unsignedBytes, msg.Tx)
 
 	txID := tx.ID()
-	if _, dropped, found := h.atomicMempool.GetTx(txID); found || dropped {
+	h.stats.IncAtomicGossipReceived()
+	if _, dropped, found := h.atomicMempool.GetTx(txID); found {
+		h.stats.IncAtomicGossipReceivedKnown()
+		return nil
+	} else if dropped {
+		h.stats.IncAtomicGossipReceivedDropped()
 		return nil
 	}
 
+	h.stats.IncAtomicGossipReceivedNew()
 	if err := h.vm.issueTx(&tx, false /*=local*/); err != nil {
 		log.Trace(
 			"AppGossip provided invalid transaction",
@@ -496,6 +515,7 @@ func (h *GossipHandler) HandleEthTxs(nodeID ids.NodeID, msg message.EthTxsGossip
 		)
 		return nil
 	}
+	h.stats.IncEthTxsGossipReceived()
 	errs := h.txPool.AddRemotes(txs)
 	for i, err := range errs {
 		if err != nil {
@@ -504,7 +524,14 @@ func (h *GossipHandler) HandleEthTxs(nodeID ids.NodeID, msg message.EthTxsGossip
 				"err", err,
 				"tx", txs[i].Hash(),
 			)
+			if err == core.ErrAlreadyKnown {
+				h.stats.IncEthTxsGossipReceivedKnown()
+			} else {
+				h.stats.IncAtomicGossipReceivedError()
+			}
+			continue
 		}
+		h.stats.IncEthTxsGossipReceivedNew()
 	}
 	return nil
 }

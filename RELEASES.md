@@ -1,5 +1,41 @@
 # Release Notes
 
+## [v0.8.16](https://github.com/ava-labs/coreth/releases/tag/v0.8.16)
+
+- Fix bug in `codeToFetch` database accessors that caused an error when starting/stopping state sync
+- Bump go-ethereum version to v1.10.21
+- Update gas price estimation to limit lookback window based on block timestamps
+- Add metrics for processed/accepted gas
+- Simplify syntactic block verification
+- Ensure statedb errors during block processing are logged
+- Remove deprecated gossiper/block building logic from pre-Apricot Phase 4
+- Add marshal function for duration to improve config output
+
+## [v0.8.15](https://github.com/ava-labs/coreth/releases/tag/v0.8.15)
+
+- Add optional JSON logging
+- Bump minimum go version to v1.18.1
+- Add interface for suppporting stateful precompiles
+- Remove legacy code format from the database
+- Enable expensive metrics by default
+- Fix atomic trie sync bug that could result in storing incorrect metadata
+- Update state sync metrics to use counter for number of items received
+
+## [v0.8.14](https://github.com/ava-labs/coreth/releases/tag/v0.8.14)
+
+- Bump go-ethereum dependency to v1.10.20
+- Update API names used to enable services in `eth-api` config flag. Prior names are supported but deprecated, please update your configuration [accordingly](https://docs.avax.network/nodes/maintain/chain-config-flags#c-chain-configs)
+- Optimizes state sync by parallelizing trie syncing
+- Adds `eth_syncing` API for compatibility. Note: This API is only accessible after bootstrapping and always returns `"false"`, since the node will no longer be syncing at that point.
+- Adds metrics to atomic transaction mempool
+- Adds metrics for incoming/outgoing mempool gossip
+
+## [v0.8.13](https://github.com/ava-labs/coreth/releases/tag/v0.8.13)
+
+- Bump go-ethereum dependency to v1.10.18
+- Parallelize state sync code fetching
+- Deprecated CB58 format for API calls
+
 ## [v0.8.12](https://github.com/ava-labs/coreth/releases/tag/v0.8.12)
 
 - Add peer bandwidth tracking to optimize state sync message routing
