@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ava-labs/coreth/core/state/snapshot"
-	"github.com/ava-labs/coreth/ethdb"
-	syncclient "github.com/ava-labs/coreth/sync/client"
-	"github.com/ava-labs/coreth/trie"
+	"github.com/tenderly/coreth/core/state/snapshot"
+	"github.com/tenderly/coreth/ethdb"
+	syncclient "github.com/tenderly/coreth/sync/client"
+	"github.com/tenderly/coreth/trie"
 	"github.com/ethereum/go-ethereum/common"
 	"golang.org/x/sync/errgroup"
 )

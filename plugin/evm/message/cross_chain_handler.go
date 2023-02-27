@@ -9,8 +9,8 @@ import (
 
 	"github.com/ava-labs/avalanchego/codec"
 	"github.com/ava-labs/avalanchego/ids"
-	"github.com/ava-labs/coreth/internal/ethapi"
-	"github.com/ava-labs/coreth/rpc"
+	"github.com/tenderly/coreth/internal/ethapi"
+	"github.com/tenderly/coreth/rpc"
 	"github.com/ethereum/go-ethereum/log"
 )
 
