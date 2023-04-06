@@ -11,7 +11,7 @@ import (
 
 	"github.com/ava-labs/avalanchego/chains/atomic"
 	"github.com/ava-labs/avalanchego/snow"
-	"github.com/ava-labs/coreth/params"
+	"github.com/tenderly/coreth/params"
 	"github.com/stretchr/testify/require"
 )
 

@@ -16,7 +16,7 @@ import (
 	"github.com/ava-labs/avalanchego/utils/set"
 	ethcommon "github.com/ethereum/go-ethereum/common"
 
-	"github.com/ava-labs/coreth/plugin/evm/message"
+	"github.com/tenderly/coreth/plugin/evm/message"
 
 	"github.com/stretchr/testify/assert"
 
