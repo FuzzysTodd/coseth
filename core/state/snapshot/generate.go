@@ -33,15 +33,16 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/tenderly/coreth/core/rawdb"
-	"github.com/tenderly/coreth/ethdb"
-	"github.com/tenderly/coreth/trie"
-	"github.com/tenderly/coreth/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/tenderly/coreth/core/rawdb"
+	"github.com/tenderly/coreth/ethdb"
+	"github.com/tenderly/coreth/trie"
+	"github.com/tenderly/coreth/utils"
+	"golang.org/x/exp/slog"
 )
 
 const (
@@ -82,7 +83,7 @@ func (gs *generatorStats) Debug(msg string, root common.Hash, marker []byte) {
 
 // log creates an contextual log with the given message and the context pulled
 // from the internally maintained statistics.
-func (gs *generatorStats) log(level log.Lvl, msg string, root common.Hash, marker []byte) {
+func (gs *generatorStats) log(level slog.Level, msg string, root common.Hash, marker []byte) {
 	var ctx []interface{}
 	if root != (common.Hash{}) {
 		ctx = append(ctx, []interface{}{"root", root}...)
@@ -117,17 +118,17 @@ func (gs *generatorStats) log(level log.Lvl, msg string, root common.Hash, marke
 	}
 
 	switch level {
-	case log.LvlTrace:
+	case log.LevelTrace:
 		log.Trace(msg, ctx...)
-	case log.LvlDebug:
+	case log.LevelDebug:
 		log.Debug(msg, ctx...)
-	case log.LvlInfo:
+	case log.LevelInfo:
 		log.Info(msg, ctx...)
-	case log.LvlWarn:
+	case log.LevelWarn:
 		log.Warn(msg, ctx...)
-	case log.LvlError:
+	case log.LevelError:
 		log.Error(msg, ctx...)
-	case log.LvlCrit:
+	case log.LevelCrit:
 		log.Crit(msg, ctx...)
 	default:
 		log.Error(fmt.Sprintf("log with invalid log level %s: %s", level, msg), ctx...)
@@ -137,7 +138,13 @@ func (gs *generatorStats) log(level log.Lvl, msg string, root common.Hash, marke
 // generateSnapshot regenerates a brand new snapshot based on an existing state
 // database and head block asynchronously. The snapshot is returned immediately
 // and generation is continued in the background until done.
-func generateSnapshot(diskdb ethdb.KeyValueStore, triedb *trie.Database, cache int, blockHash, root common.Hash, wiper chan struct{}) *diskLayer {
+func generateSnapshot(
+	diskdb ethdb.KeyValueStore,
+	triedb *trie.Database,
+	cache int,
+	blockHash, root common.Hash,
+	wiper chan struct{},
+) *diskLayer {
 	// Wipe any previously existing snapshot from the database if no wiper is
 	// currently in progress.
 	if wiper == nil {
@@ -336,14 +343,25 @@ func (dl *diskLayer) generate(stats *generatorStats) {
 		if acc.Root != emptyRoot {
 			storeTrie, err := trie.NewStateTrie(accountHash, acc.Root, dl.triedb)
 			if err != nil {
-				log.Error("Generator failed to access storage trie", "root", dl.root, "account", accountHash, "stroot", acc.Root, "err", err)
+				log.Error(
+					"Generator failed to access storage trie",
+					"root",
+					dl.root,
+					"account",
+					accountHash,
+					"stroot",
+					acc.Root,
+					"err",
+					err,
+				)
 				abort := <-dl.genAbort
 				dl.genStats = stats
 				close(abort)
 				return
 			}
 			var storeMarker []byte
-			if accMarker != nil && bytes.Equal(accountHash[:], accMarker) && len(dl.genMarker) > common.HashLength {
+			if accMarker != nil && bytes.Equal(accountHash[:], accMarker) &&
+				len(dl.genMarker) > common.HashLength {
 				storeMarker = dl.genMarker[common.HashLength:]
 			}
 			storeIt := trie.NewIterator(storeTrie.NodeIterator(storeMarker))
@@ -358,7 +376,17 @@ func (dl *diskLayer) generate(stats *generatorStats) {
 				}
 			}
 			if err := storeIt.Err; err != nil {
-				log.Error("Generator failed to iterate storage trie", "accroot", dl.root, "acchash", common.BytesToHash(accIt.Key), "stroot", acc.Root, "err", err)
+				log.Error(
+					"Generator failed to iterate storage trie",
+					"accroot",
+					dl.root,
+					"acchash",
+					common.BytesToHash(accIt.Key),
+					"stroot",
+					acc.Root,
+					"err",
+					err,
+				)
 				abort := <-dl.genAbort
 				dl.genStats = stats
 				close(abort)
