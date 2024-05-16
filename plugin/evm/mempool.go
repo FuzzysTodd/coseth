@@ -14,8 +14,8 @@ import (
 	"github.com/ava-labs/avalanchego/snow"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/ava-labs/coreth/metrics"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/tenderly/coreth/metrics"
 )
 
 const (

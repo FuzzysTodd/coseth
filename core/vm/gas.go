@@ -27,8 +27,8 @@
 package vm
 
 import (
-	"github.com/ava-labs/coreth/vmerrs"
 	"github.com/holiman/uint256"
+	"github.com/tenderly/coreth/vmerrs"
 )
 
 // Gas costs

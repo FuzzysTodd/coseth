@@ -14,14 +14,14 @@ import (
 	"github.com/ava-labs/avalanchego/vms/platformvm/warp"
 	avalancheWarp "github.com/ava-labs/avalanchego/vms/platformvm/warp"
 	"github.com/ava-labs/avalanchego/vms/platformvm/warp/payload"
-	"github.com/ava-labs/coreth/core/state"
-	"github.com/ava-labs/coreth/precompile/contract"
-	"github.com/ava-labs/coreth/precompile/testutils"
-	"github.com/ava-labs/coreth/predicate"
-	"github.com/ava-labs/coreth/utils"
-	"github.com/ava-labs/coreth/vmerrs"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
+	"github.com/tenderly/coreth/core/state"
+	"github.com/tenderly/coreth/precompile/contract"
+	"github.com/tenderly/coreth/precompile/testutils"
+	"github.com/tenderly/coreth/predicate"
+	"github.com/tenderly/coreth/utils"
+	"github.com/tenderly/coreth/vmerrs"
 )
 
 func TestGetBlockchainID(t *testing.T) {

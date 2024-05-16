@@ -32,14 +32,14 @@ import (
 	"math"
 	"math/big"
 
-	"github.com/ava-labs/coreth/consensus/misc/eip4844"
-	"github.com/ava-labs/coreth/core/types"
-	"github.com/ava-labs/coreth/core/vm"
-	"github.com/ava-labs/coreth/params"
-	"github.com/ava-labs/coreth/utils"
-	"github.com/ava-labs/coreth/vmerrs"
 	"github.com/ethereum/go-ethereum/common"
 	cmath "github.com/ethereum/go-ethereum/common/math"
+	"github.com/tenderly/coreth/consensus/misc/eip4844"
+	"github.com/tenderly/coreth/core/types"
+	"github.com/tenderly/coreth/core/vm"
+	"github.com/tenderly/coreth/params"
+	"github.com/tenderly/coreth/utils"
+	"github.com/tenderly/coreth/vmerrs"
 )
 
 // ExecutionResult includes all output after executing given evm
