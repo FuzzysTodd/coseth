@@ -29,9 +29,9 @@ package state
 import (
 	"testing"
 
-	"github.com/ava-labs/coreth/core/rawdb"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/tenderly/coreth/core/rawdb"
 )
 
 // Tests that the node iterator indeed walks over the entire database contents.

@@ -36,10 +36,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ava-labs/coreth/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/tenderly/coreth/accounts"
 	"golang.org/x/exp/slices"
 )
 

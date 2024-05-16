@@ -42,9 +42,9 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/ava-labs/coreth/core"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/tenderly/coreth/core"
 	"golang.org/x/exp/slices"
 )
 
