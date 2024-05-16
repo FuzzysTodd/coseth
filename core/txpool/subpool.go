@@ -30,10 +30,10 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ava-labs/coreth/core"
-	"github.com/ava-labs/coreth/core/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/tenderly/coreth/core"
+	"github.com/tenderly/coreth/core/types"
 )
 
 // LazyTransaction contains a small subset of the transaction properties that is

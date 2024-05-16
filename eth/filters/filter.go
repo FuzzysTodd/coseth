@@ -32,10 +32,10 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ava-labs/coreth/core/bloombits"
-	"github.com/ava-labs/coreth/core/types"
-	"github.com/ava-labs/coreth/rpc"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/tenderly/coreth/core/bloombits"
+	"github.com/tenderly/coreth/core/types"
+	"github.com/tenderly/coreth/rpc"
 )
 
 // Filter can be used to retrieve and filter logs.

@@ -30,10 +30,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ava-labs/coreth/metrics"
-	"github.com/ava-labs/coreth/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/tenderly/coreth/metrics"
+	"github.com/tenderly/coreth/utils"
 )
 
 // triePrefetchMetricsPrefix is the prefix under which to publish the metrics.

@@ -18,10 +18,10 @@ import (
 	"github.com/ava-labs/avalanchego/utils/crypto/bls"
 	avalancheWarp "github.com/ava-labs/avalanchego/vms/platformvm/warp"
 	"github.com/ava-labs/avalanchego/vms/platformvm/warp/payload"
-	"github.com/ava-labs/coreth/plugin/evm/message"
-	"github.com/ava-labs/coreth/utils"
-	"github.com/ava-labs/coreth/warp"
 	"github.com/stretchr/testify/require"
+	"github.com/tenderly/coreth/plugin/evm/message"
+	"github.com/tenderly/coreth/utils"
+	"github.com/tenderly/coreth/warp"
 )
 
 func TestMessageSignatureHandler(t *testing.T) {

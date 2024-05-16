@@ -27,10 +27,10 @@
 package trie
 
 import (
-	"github.com/ava-labs/coreth/core/types"
-	"github.com/ava-labs/coreth/trie/trienode"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/tenderly/coreth/core/types"
+	"github.com/tenderly/coreth/trie/trienode"
 )
 
 // SecureTrie is the old name of StateTrie.

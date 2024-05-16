@@ -32,12 +32,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ava-labs/coreth/core/rawdb"
-	"github.com/ava-labs/coreth/trie"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/tenderly/coreth/core/rawdb"
+	"github.com/tenderly/coreth/trie"
 )
 
 // journalGenerator is a disk layer entry containing the generator progress marker.

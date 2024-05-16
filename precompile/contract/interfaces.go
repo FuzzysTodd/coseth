@@ -8,8 +8,8 @@ import (
 	"math/big"
 
 	"github.com/ava-labs/avalanchego/snow"
-	"github.com/ava-labs/coreth/precompile/precompileconfig"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/tenderly/coreth/precompile/precompileconfig"
 )
 
 // StatefulPrecompiledContract is the interface for executing a precompiled contract

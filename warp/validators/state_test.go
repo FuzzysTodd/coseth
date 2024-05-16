@@ -10,8 +10,8 @@ import (
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/snow/validators"
 	"github.com/ava-labs/avalanchego/utils/constants"
-	"github.com/ava-labs/coreth/utils"
 	"github.com/stretchr/testify/require"
+	"github.com/tenderly/coreth/utils"
 	"go.uber.org/mock/gomock"
 )
 

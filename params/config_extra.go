@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/ava-labs/avalanchego/snow"
-	"github.com/ava-labs/coreth/utils"
+	"github.com/tenderly/coreth/utils"
 )
 
 // UpgradeConfig includes the following configs that may be specified in upgradeBytes:

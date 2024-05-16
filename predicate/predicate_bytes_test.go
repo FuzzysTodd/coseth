@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/ava-labs/avalanchego/utils"
-	"github.com/ava-labs/coreth/params"
 	"github.com/stretchr/testify/require"
+	"github.com/tenderly/coreth/params"
 )
 
 func testPackPredicate(t testing.TB, b []byte) {

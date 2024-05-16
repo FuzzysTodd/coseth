@@ -30,10 +30,10 @@ import (
 	"container/heap"
 	"math/big"
 
-	"github.com/ava-labs/coreth/core/txpool"
-	"github.com/ava-labs/coreth/core/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
+	"github.com/tenderly/coreth/core/txpool"
+	"github.com/tenderly/coreth/core/types"
 )
 
 // txWithMinerFee wraps a transaction with its gas price or effective miner gasTipCap

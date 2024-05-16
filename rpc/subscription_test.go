@@ -38,8 +38,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ava-labs/coreth/core/types"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/tenderly/coreth/core/types"
 )
 
 func TestNewID(t *testing.T) {

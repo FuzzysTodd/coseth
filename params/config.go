@@ -34,10 +34,10 @@ import (
 
 	"github.com/ava-labs/avalanchego/utils/constants"
 	"github.com/ava-labs/avalanchego/version"
-	"github.com/ava-labs/coreth/precompile/modules"
-	"github.com/ava-labs/coreth/precompile/precompileconfig"
-	"github.com/ava-labs/coreth/utils"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/tenderly/coreth/precompile/modules"
+	"github.com/tenderly/coreth/precompile/precompileconfig"
+	"github.com/tenderly/coreth/utils"
 )
 
 const maxJSONLen = 64 * 1024 * 1024 // 64MB
