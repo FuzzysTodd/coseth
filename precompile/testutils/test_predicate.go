@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ava-labs/coreth/precompile/precompileconfig"
 	"github.com/stretchr/testify/require"
+	"github.com/tenderly/coreth/precompile/precompileconfig"
 )
 
 // PredicateTest defines a unit test/benchmark for verifying a precompile predicate.

@@ -6,8 +6,8 @@ package predicate
 import (
 	"fmt"
 
-	"github.com/ava-labs/coreth/params"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/tenderly/coreth/params"
 )
 
 // EndByte is used as a delimiter for the bytes packed into a precompile predicate.

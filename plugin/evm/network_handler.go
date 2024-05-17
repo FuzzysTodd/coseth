@@ -8,14 +8,14 @@ import (
 
 	"github.com/ava-labs/avalanchego/codec"
 	"github.com/ava-labs/avalanchego/ids"
-	"github.com/ava-labs/coreth/metrics"
-	"github.com/ava-labs/coreth/plugin/evm/message"
-	syncHandlers "github.com/ava-labs/coreth/sync/handlers"
-	syncStats "github.com/ava-labs/coreth/sync/handlers/stats"
-	"github.com/ava-labs/coreth/trie"
-	"github.com/ava-labs/coreth/warp"
-	warpHandlers "github.com/ava-labs/coreth/warp/handlers"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/tenderly/coreth/metrics"
+	"github.com/tenderly/coreth/plugin/evm/message"
+	syncHandlers "github.com/tenderly/coreth/sync/handlers"
+	syncStats "github.com/tenderly/coreth/sync/handlers/stats"
+	"github.com/tenderly/coreth/trie"
+	"github.com/tenderly/coreth/warp"
+	warpHandlers "github.com/tenderly/coreth/warp/handlers"
 )
 
 var _ message.RequestHandler = &networkHandler{}

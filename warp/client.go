@@ -8,8 +8,8 @@ import (
 	"fmt"
 
 	"github.com/ava-labs/avalanchego/ids"
-	"github.com/ava-labs/coreth/rpc"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/tenderly/coreth/rpc"
 )
 
 var _ Client = (*client)(nil)
