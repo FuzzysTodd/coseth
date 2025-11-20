@@ -1,6 +1,6 @@
 module github.com/ava-labs/coreth
 
-go 1.21.10
+go 1.24.0
 
 require (
 	github.com/VictoriaMetrics/fastcache v1.12.1
@@ -10,8 +10,8 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set/v2 v2.1.0
 	github.com/dop251/goja v0.0.0-20230806174421-c933cf95e127
-	github.com/ethereum/go-ethereum v1.13.8
-	github.com/fjl/memsize v0.0.0-20190710130421-bcb5799ab5e5
+	github.com/ethereum/go-ethereum v1.13.15
+	github.com/fjl/memsize v0.0.2
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gballet/go-libpcsclite v0.0.0-20191108122812-4678299bea08
 	github.com/gballet/go-verkle v0.1.1-0.20231031103413-a67434b50f46
@@ -20,7 +20,7 @@ require (
 	github.com/gorilla/websocket v1.4.2
 	github.com/hashicorp/go-bexpr v0.1.10
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d
-	github.com/holiman/billy v0.0.0-20230718173358-1c7e68d277a7
+	github.com/holiman/billy v0.0.0-20240216141850-2abb0c79d3c4
 	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.2.4
 	github.com/kylelemons/godebug v1.1.0
@@ -31,19 +31,19 @@ require (
 	github.com/prometheus/client_model v0.3.0
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/spf13/cast v1.5.0
-	github.com/spf13/pflag v1.0.5
+	github.com/spf13/pflag v1.0.6
 	github.com/spf13/viper v1.12.0
 	github.com/status-im/keycard-go v0.2.0
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.10.0
 	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/urfave/cli/v2 v2.25.7
 	go.uber.org/goleak v1.3.0
 	go.uber.org/mock v0.4.0
-	golang.org/x/crypto v0.21.0
+	golang.org/x/crypto v0.45.0
 	golang.org/x/exp v0.0.0-20231127185646-65229373498e
-	golang.org/x/sync v0.6.0
-	golang.org/x/sys v0.18.0
-	golang.org/x/text v0.14.0
+	golang.org/x/sync v0.18.0
+	golang.org/x/sys v0.38.0
+	golang.org/x/text v0.31.0
 	golang.org/x/time v0.3.0
 	google.golang.org/protobuf v1.33.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
@@ -52,7 +52,7 @@ require (
 require (
 	github.com/DataDog/zstd v1.5.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.10.0 // indirect
+	github.com/bits-and-blooms/bitset v1.20.0 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.3.2 // indirect
 	github.com/btcsuite/btcd/btcutil v1.1.3 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
@@ -62,8 +62,7 @@ require (
 	github.com/cockroachdb/pebble v0.0.0-20230928194634-aa077af62593 // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
 	github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 // indirect
-	github.com/consensys/bavard v0.1.13 // indirect
-	github.com/consensys/gnark-crypto v0.12.1 // indirect
+	github.com/consensys/gnark-crypto v0.18.1 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/crate-crypto/go-kzg-4844 v0.7.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.1.0 // indirect
@@ -72,7 +71,7 @@ require (
 	github.com/getsentry/sentry-go v0.18.0 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-ole/go-ole v1.2.6 // indirect
+	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
@@ -90,7 +89,6 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/pointerstructure v1.2.0 // indirect
-	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/nbutton23/zxcvbn-go v0.0.0-20180912185939-ae427f1e4c1d // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
@@ -121,8 +119,8 @@ require (
 	go.opentelemetry.io/proto/otlp v1.0.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
-	golang.org/x/net v0.23.0 // indirect
-	golang.org/x/term v0.18.0 // indirect
+	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/term v0.37.0 // indirect
 	gonum.org/v1/gonum v0.11.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240123012728-ef4313101c80 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240123012728-ef4313101c80 // indirect
@@ -130,5 +128,4 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	rsc.io/tmplfunc v0.0.3 // indirect
 )
