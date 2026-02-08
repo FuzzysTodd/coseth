@@ -30,7 +30,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/tenderly/coreth/consensus"
 	"github.com/tenderly/coreth/consensus/dummy"
 	"github.com/tenderly/coreth/consensus/misc"
@@ -39,6 +38,7 @@ import (
 	"github.com/tenderly/coreth/core/vm"
 	"github.com/tenderly/coreth/ethdb"
 	"github.com/tenderly/coreth/params"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // BlockGen creates blocks for testing.
@@ -250,7 +250,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 
 			// Write state changes to db
-			root, err := statedb.Commit(config.IsEIP158(b.header.Number), false)
+			root, err := statedb.Commit(config.IsEIP158(b.header.Number))
 			if err != nil {
 				panic(fmt.Sprintf("state write error: %v", err))
 			}

@@ -31,15 +31,17 @@
 package core
 
 import (
+	"io/ioutil"
 	"math/big"
+	"os"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/tenderly/coreth/consensus/dummy"
 	"github.com/tenderly/coreth/core/rawdb"
 	"github.com/tenderly/coreth/core/types"
 	"github.com/tenderly/coreth/core/vm"
 	"github.com/tenderly/coreth/params"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // rewindTest is a test case for chain rollback upon user request.
@@ -506,7 +508,11 @@ func testRepair(t *testing.T, tt *rewindTest, snapshots bool) {
 	// fmt.Println(tt.dump(true))
 
 	// Create a temporary persistent database
-	datadir := t.TempDir()
+	datadir, err := ioutil.TempDir("", "")
+	if err != nil {
+		t.Fatalf("Failed to create temporary datadir: %v", err)
+	}
+	os.RemoveAll(datadir)
 
 	db, err := rawdb.NewLevelDBDatabase(datadir, 0, 0, "", false)
 	if err != nil {
