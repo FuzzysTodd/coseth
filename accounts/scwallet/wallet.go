@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2018 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -35,7 +45,7 @@ import (
 
 	"github.com/ava-labs/coreth/accounts"
 	"github.com/ava-labs/coreth/core/types"
-	ethereum "github.com/ethereum/go-ethereum"
+	"github.com/ava-labs/coreth/interfaces"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
@@ -99,8 +109,8 @@ const (
 	P1DeriveKeyFromCurrent = uint8(0x10)
 	statusP1WalletStatus   = uint8(0x00)
 	statusP1Path           = uint8(0x01)
-	signP1PrecomputedHash  = uint8(0x01)
-	signP2OnlyBlock        = uint8(0x81)
+	signP1PrecomputedHash  = uint8(0x00)
+	signP2OnlyBlock        = uint8(0x00)
 	exportP1Any            = uint8(0x00)
 	exportP2Pubkey         = uint8(0x01)
 )
@@ -119,11 +129,11 @@ type Wallet struct {
 	session *Session   // The secure communication session with the card
 	log     log.Logger // Contextual logger to tag the base with its id
 
-	deriveNextPaths []accounts.DerivationPath // Next derivation paths for account auto-discovery (multiple bases supported)
-	deriveNextAddrs []common.Address          // Next derived account addresses for auto-discovery (multiple bases supported)
-	deriveChain     ethereum.ChainStateReader // Blockchain state reader to discover used account with
-	deriveReq       chan chan struct{}        // Channel to request a self-derivation on
-	deriveQuit      chan chan error           // Channel to terminate the self-deriver with
+	deriveNextPaths []accounts.DerivationPath   // Next derivation paths for account auto-discovery (multiple bases supported)
+	deriveNextAddrs []common.Address            // Next derived account addresses for auto-discovery (multiple bases supported)
+	deriveChain     interfaces.ChainStateReader // Blockchain state reader to discover used account with
+	deriveReq       chan chan struct{}          // Channel to request a self-derivation on
+	deriveQuit      chan chan error             // Channel to terminate the self-deriver with
 }
 
 // NewWallet constructs and returns a new Wallet instance.
@@ -167,7 +177,7 @@ func transmit(card *pcsc.Card, command *commandAPDU) (*responseAPDU, error) {
 	}
 
 	if response.Sw1 != sw1Ok {
-		return nil, fmt.Errorf("unexpected insecure response status Cla=0x%x, Ins=0x%x, Sw=0x%x%x", command.Cla, command.Ins, response.Sw1, response.Sw2)
+		return nil, fmt.Errorf("unexpected insecure response status Cla=%#x, Ins=%#x, Sw=%#x%x", command.Cla, command.Ins, response.Sw1, response.Sw2)
 	}
 
 	return response, nil
@@ -252,7 +262,7 @@ func (w *Wallet) release() error {
 // with the wallet.
 func (w *Wallet) pair(puk []byte) error {
 	if w.session.paired() {
-		return fmt.Errorf("wallet already paired")
+		return errors.New("wallet already paired")
 	}
 	pairing, err := w.session.pair(puk)
 	if err != nil {
@@ -637,8 +647,8 @@ func (w *Wallet) Derive(path accounts.DerivationPath, pin bool) (accounts.Accoun
 // to discover non zero accounts and automatically add them to list of tracked
 // accounts.
 //
-// Note, self derivaton will increment the last component of the specified path
-// opposed to decending into a child path to allow discovering accounts starting
+// Note, self derivation will increment the last component of the specified path
+// opposed to descending into a child path to allow discovering accounts starting
 // from non zero components.
 //
 // Some hardware wallets switched derivation paths through their evolution, so
@@ -647,7 +657,7 @@ func (w *Wallet) Derive(path accounts.DerivationPath, pin bool) (accounts.Accoun
 //
 // You can disable automatic account discovery by calling SelfDerive with a nil
 // chain state reader.
-func (w *Wallet) SelfDerive(bases []accounts.DerivationPath, chain ethereum.ChainStateReader) {
+func (w *Wallet) SelfDerive(bases []accounts.DerivationPath, chain interfaces.ChainStateReader) {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
@@ -666,7 +676,7 @@ func (w *Wallet) SelfDerive(bases []accounts.DerivationPath, chain ethereum.Chai
 // or optionally with the aid of any location metadata from the embedded URL field.
 //
 // If the wallet requires additional authentication to sign the request (e.g.
-// a password to decrypt the account, or a PIN code o verify the transaction),
+// a password to decrypt the account, or a PIN code to verify the transaction),
 // an AuthNeededError instance will be returned, containing infos for the user
 // about which fields or actions are needed. The user may retry by providing
 // the needed details via SignDataWithPassphrase, or by other means (e.g. unlock
@@ -693,13 +703,13 @@ func (w *Wallet) signHash(account accounts.Account, hash []byte) ([]byte, error)
 // or optionally with the aid of any location metadata from the embedded URL field.
 //
 // If the wallet requires additional authentication to sign the request (e.g.
-// a password to decrypt the account, or a PIN code o verify the transaction),
+// a password to decrypt the account, or a PIN code to verify the transaction),
 // an AuthNeededError instance will be returned, containing infos for the user
 // about which fields or actions are needed. The user may retry by providing
 // the needed details via SignTxWithPassphrase, or by other means (e.g. unlock
 // the account in a keystore).
 func (w *Wallet) SignTx(account accounts.Account, tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
-	signer := types.NewEIP155Signer(chainID)
+	signer := types.LatestSignerForChainID(chainID)
 	hash := signer.Hash(tx)
 	sig, err := w.signHash(account, hash[:])
 	if err != nil {
@@ -733,7 +743,7 @@ func (w *Wallet) signHashWithPassphrase(account accounts.Account, passphrase str
 // or optionally with the aid of any location metadata from the embedded URL field.
 //
 // If the wallet requires additional authentication to sign the request (e.g.
-// a password to decrypt the account, or a PIN code o verify the transaction),
+// a password to decrypt the account, or a PIN code to verify the transaction),
 // an AuthNeededError instance will be returned, containing infos for the user
 // about which fields or actions are needed. The user may retry by providing
 // the needed details via SignHashWithPassphrase, or by other means (e.g. unlock
@@ -776,16 +786,16 @@ func (w *Wallet) findAccountPath(account accounts.Account) (accounts.DerivationP
 		return nil, fmt.Errorf("scheme %s does not match wallet scheme %s", account.URL.Scheme, w.Hub.scheme)
 	}
 
-	parts := strings.SplitN(account.URL.Path, "/", 2)
-	if len(parts) != 2 {
+	url, path, found := strings.Cut(account.URL.Path, "/")
+	if !found {
 		return nil, fmt.Errorf("invalid URL format: %s", account.URL)
 	}
 
-	if parts[0] != fmt.Sprintf("%x", w.PublicKey[1:3]) {
+	if url != fmt.Sprintf("%x", w.PublicKey[1:3]) {
 		return nil, fmt.Errorf("URL %s is not for this wallet", account.URL)
 	}
 
-	return accounts.ParseDerivationPath(parts[1])
+	return accounts.ParseDerivationPath(path)
 }
 
 // Session represents a secured communication session with the wallet.
@@ -813,7 +823,7 @@ func (s *Session) pair(secret []byte) (smartcardPairing, error) {
 // unpair deletes an existing pairing.
 func (s *Session) unpair() error {
 	if !s.verified {
-		return fmt.Errorf("unpair requires that the PIN be verified")
+		return errors.New("unpair requires that the PIN be verified")
 	}
 	return s.Channel.Unpair()
 }
@@ -879,6 +889,7 @@ func (s *Session) walletStatus() (*walletStatus, error) {
 }
 
 // derivationPath fetches the wallet's current derivation path from the card.
+//
 //lint:ignore U1000 needs to be added to the console interface
 func (s *Session) derivationPath() (accounts.DerivationPath, error) {
 	response, err := s.Channel.transmitEncrypted(claSCWallet, insStatus, statusP1Path, 0, nil)
@@ -906,7 +917,7 @@ func (s *Session) initialize(seed []byte) error {
 		return err
 	}
 	if status == "Online" {
-		return fmt.Errorf("card is already initialized, cowardly refusing to proceed")
+		return errors.New("card is already initialized, cowardly refusing to proceed")
 	}
 
 	s.Wallet.lock.Lock()
@@ -994,6 +1005,7 @@ func (s *Session) derive(path accounts.DerivationPath) (accounts.Account, error)
 }
 
 // keyExport contains information on an exported keypair.
+//
 //lint:ignore U1000 needs to be added to the console interface
 type keyExport struct {
 	PublicKey  []byte `asn1:"tag:0"`
@@ -1001,6 +1013,7 @@ type keyExport struct {
 }
 
 // publicKey returns the public key for the current derivation path.
+//
 //lint:ignore U1000 needs to be added to the console interface
 func (s *Session) publicKey() ([]byte, error) {
 	response, err := s.Channel.transmitEncrypted(claSCWallet, insExportKey, exportP1Any, exportP2Pubkey, nil)

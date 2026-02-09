@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2018 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -106,7 +116,7 @@ func ReadTransaction(db ethdb.Reader, hash common.Hash) (*types.Transaction, com
 	}
 	body := ReadBody(db, blockHash, *blockNumber)
 	if body == nil {
-		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
+		log.Error("Transaction referenced missing", "number", *blockNumber, "hash", blockHash)
 		return nil, common.Hash{}, 0, 0
 	}
 	for txIndex, tx := range body.Transactions {
@@ -114,7 +124,7 @@ func ReadTransaction(db ethdb.Reader, hash common.Hash) (*types.Transaction, com
 			return tx, blockHash, *blockNumber, uint64(txIndex)
 		}
 	}
-	log.Error("Transaction not found", "number", blockNumber, "hash", blockHash, "txhash", hash)
+	log.Error("Transaction not found", "number", *blockNumber, "hash", blockHash, "txhash", hash)
 	return nil, common.Hash{}, 0, 0
 }
 
@@ -130,14 +140,18 @@ func ReadReceipt(db ethdb.Reader, hash common.Hash, config *params.ChainConfig) 
 	if blockHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, 0
 	}
+	blockHeader := ReadHeader(db, blockHash, *blockNumber)
+	if blockHeader == nil {
+		return nil, common.Hash{}, 0, 0
+	}
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts := ReadReceipts(db, blockHash, *blockNumber, config)
+	receipts := ReadReceipts(db, blockHash, *blockNumber, blockHeader.Time, config)
 	for receiptIndex, receipt := range receipts {
 		if receipt.TxHash == hash {
 			return receipt, blockHash, *blockNumber, uint64(receiptIndex)
 		}
 	}
-	log.Error("Receipt not found", "number", blockNumber, "hash", blockHash, "txhash", hash)
+	log.Error("Receipt not found", "number", *blockNumber, "hash", blockHash, "txhash", hash)
 	return nil, common.Hash{}, 0, 0
 }
 

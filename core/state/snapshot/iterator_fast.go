@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2019 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -22,6 +32,7 @@ import (
 	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
+	"golang.org/x/exp/slices"
 )
 
 // weightedIterator is a iterator with an assigned weight. It is used to prioritise
@@ -32,32 +43,25 @@ type weightedIterator struct {
 	priority int
 }
 
-// weightedIterators is a set of iterators implementing the sort.Interface.
-type weightedIterators []*weightedIterator
-
-// Len implements sort.Interface, returning the number of active iterators.
-func (its weightedIterators) Len() int { return len(its) }
-
-// Less implements sort.Interface, returning which of two iterators in the stack
-// is before the other.
-func (its weightedIterators) Less(i, j int) bool {
+func (it *weightedIterator) Cmp(other *weightedIterator) int {
 	// Order the iterators primarily by the account hashes
-	hashI := its[i].it.Hash()
-	hashJ := its[j].it.Hash()
+	hashI := it.it.Hash()
+	hashJ := other.it.Hash()
 
 	switch bytes.Compare(hashI[:], hashJ[:]) {
 	case -1:
-		return true
+		return -1
 	case 1:
-		return false
+		return 1
 	}
 	// Same account/storage-slot in multiple layers, split by priority
-	return its[i].priority < its[j].priority
-}
-
-// Swap implements sort.Interface, swapping two entries in the iterator stack.
-func (its weightedIterators) Swap(i, j int) {
-	its[i], its[j] = its[j], its[i]
+	if it.priority < other.priority {
+		return -1
+	}
+	if it.priority > other.priority {
+		return 1
+	}
+	return 0
 }
 
 // fastIterator is a more optimized multi-layer iterator which maintains a
@@ -69,18 +73,18 @@ type fastIterator struct {
 	curAccount []byte
 	curSlot    []byte
 
-	iterators weightedIterators
+	iterators []*weightedIterator
 	initiated bool
 	account   bool
 	fail      error
 }
 
-// newFastIterator creates a new hierarhical account or storage iterator with one
+// newFastIterator creates a new hierarchical account or storage iterator with one
 // element per diff layer. The returned combo iterator can be used to walk over
 // the entire snapshot diff stack simultaneously.
-func newFastIterator(tree *Tree, root common.Hash, account common.Hash, seek common.Hash, accountIterator bool) (*fastIterator, error) {
-	snap := tree.Snapshot(root)
-	if snap == nil {
+func newFastIterator(tree *Tree, root common.Hash, account common.Hash, seek common.Hash, accountIterator bool, holdsTreeLock bool) (*fastIterator, error) {
+	current := tree.getSnapshot(root, holdsTreeLock)
+	if current == nil {
 		return nil, fmt.Errorf("unknown snapshot: %x", root)
 	}
 	fi := &fastIterator{
@@ -88,7 +92,6 @@ func newFastIterator(tree *Tree, root common.Hash, account common.Hash, seek com
 		root:    root,
 		account: accountIterator,
 	}
-	current := snap.(snapshot)
 	for depth := 0; current != nil; depth++ {
 		if accountIterator {
 			fi.iterators = append(fi.iterators, &weightedIterator{
@@ -167,7 +170,7 @@ func (fi *fastIterator) init() {
 		}
 	}
 	// Re-sort the entire list
-	sort.Sort(fi.iterators)
+	slices.SortFunc(fi.iterators, func(a, b *weightedIterator) int { return a.Cmp(b) })
 	fi.initiated = false
 }
 
@@ -276,7 +279,7 @@ func (fi *fastIterator) next(idx int) bool {
 			return false
 		}
 		// The elem we're placing it next to has the same value,
-		// so whichever winds up on n+1 will need further iteraton
+		// so whichever winds up on n+1 will need further iteration
 		clash = n + 1
 
 		return cur.priority < fi.iterators[n+1].priority
@@ -319,7 +322,7 @@ func (fi *fastIterator) Slot() []byte {
 }
 
 // Release iterates over all the remaining live layer iterators and releases each
-// of thme individually.
+// of them individually.
 func (fi *fastIterator) Release() {
 	for _, it := range fi.iterators {
 		it.it.Release()
@@ -327,7 +330,7 @@ func (fi *fastIterator) Release() {
 	fi.iterators = nil
 }
 
-// Debug is a convencience helper during testing
+// Debug is a convenience helper during testing
 func (fi *fastIterator) Debug() {
 	for _, it := range fi.iterators {
 		fmt.Printf("[p=%v v=%v] ", it.priority, it.it.Hash()[0])
@@ -335,16 +338,16 @@ func (fi *fastIterator) Debug() {
 	fmt.Println()
 }
 
-// newFastAccountIterator creates a new hierarhical account iterator with one
+// newFastAccountIterator creates a new hierarchical account iterator with one
 // element per diff layer. The returned combo iterator can be used to walk over
 // the entire snapshot diff stack simultaneously.
-func newFastAccountIterator(tree *Tree, root common.Hash, seek common.Hash) (AccountIterator, error) {
-	return newFastIterator(tree, root, common.Hash{}, seek, true)
+func newFastAccountIterator(tree *Tree, root common.Hash, seek common.Hash, holdsTreeLock bool) (AccountIterator, error) {
+	return newFastIterator(tree, root, common.Hash{}, seek, true, holdsTreeLock)
 }
 
-// newFastStorageIterator creates a new hierarhical storage iterator with one
+// newFastStorageIterator creates a new hierarchical storage iterator with one
 // element per diff layer. The returned combo iterator can be used to walk over
 // the entire snapshot diff stack simultaneously.
-func newFastStorageIterator(tree *Tree, root common.Hash, account common.Hash, seek common.Hash) (StorageIterator, error) {
-	return newFastIterator(tree, root, account, seek, false)
+func newFastStorageIterator(tree *Tree, root common.Hash, account common.Hash, seek common.Hash, holdsTreeLock bool) (StorageIterator, error) {
+	return newFastIterator(tree, root, account, seek, false, holdsTreeLock)
 }

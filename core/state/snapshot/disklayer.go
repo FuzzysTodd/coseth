@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2019 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -19,34 +29,58 @@ package snapshot
 import (
 	"bytes"
 	"sync"
+	"time"
 
-	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ava-labs/coreth/core/rawdb"
+	"github.com/ava-labs/coreth/core/types"
+	"github.com/ava-labs/coreth/trie"
+	"github.com/ava-labs/coreth/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/trie"
 )
 
 // diskLayer is a low level persistent snapshot built on top of a key-value store.
 type diskLayer struct {
 	diskdb ethdb.KeyValueStore // Key-value store containing the base snapshot
-	triedb *trie.Database      // Trie node cache for reconstuction purposes
-	cache  *fastcache.Cache    // Cache to avoid hitting the disk for direct access
+	triedb *trie.Database      // Trie node cache for reconstruction purposes
+	cache  *utils.MeteredCache // Cache to avoid hitting the disk for direct access
 
-	root  common.Hash // Root hash of the base snapshot
-	stale bool        // Signals that the layer became stale (state progressed)
+	blockHash common.Hash // Block hash of the base snapshot
+	root      common.Hash // Root hash of the base snapshot
+	stale     bool        // Signals that the layer became stale (state progressed)
 
-	genMarker  []byte                    // Marker for the state that's indexed during initial layer generation
-	genPending chan struct{}             // Notification channel when generation is done (test synchronicity)
-	genAbort   chan chan *generatorStats // Notification channel to abort generating the snapshot in this layer
+	genMarker  []byte             // Marker for the state that's indexed during initial layer generation
+	genPending chan struct{}      // Notification channel when generation is done (test synchronicity)
+	genAbort   chan chan struct{} // Notification channel to abort generating the snapshot in this layer
+
+	genStats *generatorStats // Stats for snapshot generation (generation aborted/finished if non-nil)
+
+	created      time.Time // Time at which disk layer was created
+	logged       time.Time // Time at which last logged generation progress
+	abortStarted time.Time // Time as which disk layer started to be aborted
 
 	lock sync.RWMutex
+}
+
+// Release releases underlying resources; specifically the fastcache requires
+// Reset() in order to not leak memory.
+// OBS: It does not invoke Close on the diskdb
+func (dl *diskLayer) Release() error {
+	if dl.cache != nil {
+		dl.cache.Reset()
+	}
+	return nil
 }
 
 // Root returns  root hash for which this snapshot was made.
 func (dl *diskLayer) Root() common.Hash {
 	return dl.root
+}
+
+// BlockHash returns the block hash for which this snapshot was made
+func (dl *diskLayer) BlockHash() common.Hash {
+	return dl.blockHash
 }
 
 // Parent always returns nil as there's no layer below the disk.
@@ -65,7 +99,7 @@ func (dl *diskLayer) Stale() bool {
 
 // Account directly retrieves the account associated with a particular hash in
 // the snapshot slim data format.
-func (dl *diskLayer) Account(hash common.Hash) (*Account, error) {
+func (dl *diskLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
 	data, err := dl.AccountRLP(hash)
 	if err != nil {
 		return nil, err
@@ -73,7 +107,7 @@ func (dl *diskLayer) Account(hash common.Hash) (*Account, error) {
 	if len(data) == 0 { // can be both nil and []byte{}
 		return nil, nil
 	}
-	account := new(Account)
+	account := new(types.SlimAccount)
 	if err := rlp.DecodeBytes(data, account); err != nil {
 		panic(err)
 	}
@@ -161,6 +195,6 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 // Update creates a new layer on top of the existing snapshot diff tree with
 // the specified data items. Note, the maps are retained by the method to avoid
 // copying everything.
-func (dl *diskLayer) Update(blockHash common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) *diffLayer {
-	return newDiffLayer(dl, blockHash, destructs, accounts, storage)
+func (dl *diskLayer) Update(blockHash, blockRoot common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) *diffLayer {
+	return newDiffLayer(dl, blockHash, blockRoot, destructs, accounts, storage)
 }

@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2016 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -14,6 +24,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build (darwin && !cgo) || ios || (linux && arm64) || windows || (!darwin && !freebsd && !linux && !netbsd && !solaris)
 // +build darwin,!cgo ios linux,arm64 windows !darwin,!freebsd,!linux,!netbsd,!solaris
 
 // This is the fallback implementation of directory watching.
@@ -21,8 +32,14 @@
 
 package keystore
 
-type watcher struct{ running bool }
+type watcher struct {
+	running  bool
+	runEnded bool
+}
 
 func newWatcher(*accountCache) *watcher { return new(watcher) }
 func (*watcher) start()                 {}
 func (*watcher) close()                 {}
+
+// enabled returns false on systems not supported.
+func (*watcher) enabled() bool { return false }

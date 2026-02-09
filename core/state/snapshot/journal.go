@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2019 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -17,25 +27,25 @@
 package snapshot
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"time"
 
-	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ava-labs/coreth/core/rawdb"
+	"github.com/ava-labs/coreth/trie"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/trie"
 )
 
 // journalGenerator is a disk layer entry containing the generator progress marker.
 type journalGenerator struct {
-	Wiping   bool // Whether the database was in progress of being wiped
+	// Indicator that whether the database was in progress of being wiped.
+	// It's deprecated but keep it here for background compatibility.
+	Wiping bool
+
 	Done     bool // Whether the generator finished creating the snapshot
 	Marker   []byte
 	Accounts uint64
@@ -43,84 +53,77 @@ type journalGenerator struct {
 	Storage  uint64
 }
 
-// journalDestruct is an account deletion entry in a diffLayer's disk journal.
-type journalDestruct struct {
-	Hash common.Hash
-}
-
-// journalAccount is an account entry in a diffLayer's disk journal.
-type journalAccount struct {
-	Hash common.Hash
-	Blob []byte
-}
-
-// journalStorage is an account's storage map in a diffLayer's disk journal.
-type journalStorage struct {
-	Hash common.Hash
-	Keys []common.Hash
-	Vals [][]byte
-}
-
-// loadSnapshot loads a pre-existing state snapshot backed by a key-value store.
-func loadSnapshot(diskdb ethdb.KeyValueStore, triedb *trie.Database, cache int, root common.Hash) (snapshot, error) {
+// loadSnapshot loads a pre-existing state snapshot backed by a key-value
+// store. If loading the snapshot from disk is successful, this function also
+// returns a boolean indicating whether or not the snapshot is fully generated.
+func loadSnapshot(diskdb ethdb.KeyValueStore, triedb *trie.Database, cache int, blockHash, root common.Hash, noBuild bool) (snapshot, bool, error) {
 	// Retrieve the block number and hash of the snapshot, failing if no snapshot
 	// is present in the database (or crashed mid-update).
+	baseBlockHash := rawdb.ReadSnapshotBlockHash(diskdb)
+	if baseBlockHash == (common.Hash{}) {
+		return nil, false, errors.New("missing or corrupted snapshot, no snapshot block hash")
+	}
+	if baseBlockHash != blockHash {
+		return nil, false, fmt.Errorf("block hash stored on disk (%#x) does not match last accepted (%#x)", baseBlockHash, blockHash)
+	}
 	baseRoot := rawdb.ReadSnapshotRoot(diskdb)
 	if baseRoot == (common.Hash{}) {
-		return nil, errors.New("missing or corrupted snapshot")
+		return nil, false, errors.New("missing or corrupted snapshot, no snapshot root")
 	}
-	base := &diskLayer{
-		diskdb: diskdb,
-		triedb: triedb,
-		cache:  fastcache.New(cache * 1024 * 1024),
-		root:   baseRoot,
+	if baseRoot != root {
+		return nil, false, fmt.Errorf("root stored on disk (%#x) does not match last accepted (%#x)", baseRoot, root)
 	}
-	// Retrieve the journal, it must exist since even for 0 layer it stores whether
-	// we've already generated the snapshot or are in progress only
-	journal := rawdb.ReadSnapshotJournal(diskdb)
-	if len(journal) == 0 {
-		return nil, errors.New("missing or corrupted snapshot journal")
-	}
-	r := rlp.NewStream(bytes.NewReader(journal), 0)
 
-	// Read the snapshot generation progress for the disk layer
+	// Retrieve the disk layer generator. It must exist, no matter the
+	// snapshot is fully generated or not. Otherwise the entire disk
+	// layer is invalid.
+	generatorBlob := rawdb.ReadSnapshotGenerator(diskdb)
+	if len(generatorBlob) == 0 {
+		return nil, false, errors.New("missing snapshot generator")
+	}
 	var generator journalGenerator
-	if err := r.Decode(&generator); err != nil {
-		return nil, fmt.Errorf("failed to load snapshot progress marker: %v", err)
+	if err := rlp.DecodeBytes(generatorBlob, &generator); err != nil {
+		return nil, false, fmt.Errorf("failed to decode snapshot generator: %v", err)
 	}
-	// Load all the snapshot diffs from the journal
-	snapshot, err := loadDiffLayer(base, r)
-	if err != nil {
-		return nil, err
+
+	// Instantiate snapshot as disk layer with last recorded block hash and root
+	snapshot := &diskLayer{
+		diskdb:    diskdb,
+		triedb:    triedb,
+		cache:     newMeteredSnapshotCache(cache * 1024 * 1024),
+		root:      baseRoot,
+		blockHash: baseBlockHash,
+		created:   time.Now(),
 	}
-	// Entire snapshot journal loaded, sanity check the head and return
-	// Journal doesn't exist, don't worry if it's not supposed to
-	if head := snapshot.Root(); head != root {
-		return nil, fmt.Errorf("head doesn't match snapshot: have %#x, want %#x", head, root)
-	}
-	// Everything loaded correctly, resume any suspended operations
+
+	var wiper chan struct{}
+	// Load the disk layer status from the generator if it's not complete
 	if !generator.Done {
 		// If the generator was still wiping, restart one from scratch (fine for
 		// now as it's rare and the wiper deletes the stuff it touches anyway, so
 		// restarting won't incur a lot of extra database hops.
-		var wiper chan struct{}
 		if generator.Wiping {
 			log.Info("Resuming previous snapshot wipe")
-			wiper = wipeSnapshot(diskdb, false)
+			wiper = WipeSnapshot(diskdb, false)
 		}
 		// Whether or not wiping was in progress, load any generator progress too
-		base.genMarker = generator.Marker
-		if base.genMarker == nil {
-			base.genMarker = []byte{}
+		snapshot.genMarker = generator.Marker
+		if snapshot.genMarker == nil {
+			snapshot.genMarker = []byte{}
 		}
-		base.genPending = make(chan struct{})
-		base.genAbort = make(chan chan *generatorStats)
+	}
+
+	// Everything loaded correctly, resume any suspended operations
+	// if the background generation is allowed
+	if !generator.Done && !noBuild {
+		snapshot.genPending = make(chan struct{})
+		snapshot.genAbort = make(chan chan struct{})
 
 		var origin uint64
 		if len(generator.Marker) >= 8 {
 			origin = binary.BigEndian.Uint64(generator.Marker)
 		}
-		go base.generate(&generatorStats{
+		go snapshot.generate(&generatorStats{
 			wiping:   wiper,
 			origin:   origin,
 			start:    time.Now(),
@@ -129,142 +132,12 @@ func loadSnapshot(diskdb ethdb.KeyValueStore, triedb *trie.Database, cache int, 
 			storage:  common.StorageSize(generator.Storage),
 		})
 	}
-	return snapshot, nil
+
+	return snapshot, generator.Done, nil
 }
 
-// loadDiffLayer reads the next sections of a snapshot journal, reconstructing a new
-// diff and verifying that it can be linked to the requested parent.
-func loadDiffLayer(parent snapshot, r *rlp.Stream) (snapshot, error) {
-	// Read the next diff journal entry
-	var root common.Hash
-	if err := r.Decode(&root); err != nil {
-		// The first read may fail with EOF, marking the end of the journal
-		if err == io.EOF {
-			return parent, nil
-		}
-		return nil, fmt.Errorf("load diff root: %v", err)
-	}
-	var destructs []journalDestruct
-	if err := r.Decode(&destructs); err != nil {
-		return nil, fmt.Errorf("load diff destructs: %v", err)
-	}
-	destructSet := make(map[common.Hash]struct{})
-	for _, entry := range destructs {
-		destructSet[entry.Hash] = struct{}{}
-	}
-	var accounts []journalAccount
-	if err := r.Decode(&accounts); err != nil {
-		return nil, fmt.Errorf("load diff accounts: %v", err)
-	}
-	accountData := make(map[common.Hash][]byte)
-	for _, entry := range accounts {
-		if len(entry.Blob) > 0 { // RLP loses nil-ness, but `[]byte{}` is not a valid item, so reinterpret that
-			accountData[entry.Hash] = entry.Blob
-		} else {
-			accountData[entry.Hash] = nil
-		}
-	}
-	var storage []journalStorage
-	if err := r.Decode(&storage); err != nil {
-		return nil, fmt.Errorf("load diff storage: %v", err)
-	}
-	storageData := make(map[common.Hash]map[common.Hash][]byte)
-	for _, entry := range storage {
-		slots := make(map[common.Hash][]byte)
-		for i, key := range entry.Keys {
-			if len(entry.Vals[i]) > 0 { // RLP loses nil-ness, but `[]byte{}` is not a valid item, so reinterpret that
-				slots[key] = entry.Vals[i]
-			} else {
-				slots[key] = nil
-			}
-		}
-		storageData[entry.Hash] = slots
-	}
-	return loadDiffLayer(newDiffLayer(parent, root, destructSet, accountData, storageData), r)
-}
-
-// Journal writes the persistent layer generator stats into a buffer to be stored
-// in the database as the snapshot journal.
-func (dl *diskLayer) Journal(buffer *bytes.Buffer) (common.Hash, error) {
-	// If the snapshot is currently being generated, abort it
-	var stats *generatorStats
-	if dl.genAbort != nil {
-		abort := make(chan *generatorStats)
-		dl.genAbort <- abort
-
-		if stats = <-abort; stats != nil {
-			stats.Log("Journalling in-progress snapshot", dl.root, dl.genMarker)
-		}
-	}
-	// Ensure the layer didn't get stale
-	dl.lock.RLock()
-	defer dl.lock.RUnlock()
-
-	if dl.stale {
-		return common.Hash{}, ErrSnapshotStale
-	}
-	// Write out the generator marker
-	entry := journalGenerator{
-		Done:   dl.genMarker == nil,
-		Marker: dl.genMarker,
-	}
-	if stats != nil {
-		entry.Wiping = (stats.wiping != nil)
-		entry.Accounts = stats.accounts
-		entry.Slots = stats.slots
-		entry.Storage = uint64(stats.storage)
-	}
-	if err := rlp.Encode(buffer, entry); err != nil {
-		return common.Hash{}, err
-	}
-	return dl.root, nil
-}
-
-// Journal writes the memory layer contents into a buffer to be stored in the
-// database as the snapshot journal.
-func (dl *diffLayer) Journal(buffer *bytes.Buffer) (common.Hash, error) {
-	// Journal the parent first
-	base, err := dl.parent.Journal(buffer)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	// Ensure the layer didn't get stale
-	dl.lock.RLock()
-	defer dl.lock.RUnlock()
-
-	if dl.Stale() {
-		return common.Hash{}, ErrSnapshotStale
-	}
-	// Everything below was journalled, persist this layer too
-	if err := rlp.Encode(buffer, dl.root); err != nil {
-		return common.Hash{}, err
-	}
-	destructs := make([]journalDestruct, 0, len(dl.destructSet))
-	for hash := range dl.destructSet {
-		destructs = append(destructs, journalDestruct{Hash: hash})
-	}
-	if err := rlp.Encode(buffer, destructs); err != nil {
-		return common.Hash{}, err
-	}
-	accounts := make([]journalAccount, 0, len(dl.accountData))
-	for hash, blob := range dl.accountData {
-		accounts = append(accounts, journalAccount{Hash: hash, Blob: blob})
-	}
-	if err := rlp.Encode(buffer, accounts); err != nil {
-		return common.Hash{}, err
-	}
-	storage := make([]journalStorage, 0, len(dl.storageData))
-	for hash, slots := range dl.storageData {
-		keys := make([]common.Hash, 0, len(slots))
-		vals := make([][]byte, 0, len(slots))
-		for key, val := range slots {
-			keys = append(keys, key)
-			vals = append(vals, val)
-		}
-		storage = append(storage, journalStorage{Hash: hash, Keys: keys, Vals: vals})
-	}
-	if err := rlp.Encode(buffer, storage); err != nil {
-		return common.Hash{}, err
-	}
-	return base, nil
+// ResetSnapshotGeneration writes a clean snapshot generator marker to [db]
+// so no re-generation is performed after.
+func ResetSnapshotGeneration(db ethdb.KeyValueWriter) {
+	journalProgress(db, nil, nil)
 }

@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2015 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -30,36 +40,29 @@ import (
 // API describes the set of methods offered over the RPC interface
 type API struct {
 	Namespace string      // namespace under which the rpc methods of Service are exposed
-	Version   string      // api version for DApp's
+	Version   string      // deprecated - this field is no longer used, but retained for compatibility
 	Service   interface{} // receiver instance which holds the methods
-	Public    bool        // indication if the methods must be considered safe for public use
-}
-
-// Error wraps RPC errors, which contain an error code in addition to the message.
-type Error interface {
-	Error() string  // returns the message
-	ErrorCode() int // returns the code
-}
-
-// A DataError contains some data in addition to the error message.
-type DataError interface {
-	Error() string          // returns the message
-	ErrorData() interface{} // returns the error data
+	Name      string      // Name of the API
 }
 
 // ServerCodec implements reading, parsing and writing RPC messages for the server side of
 // a RPC session. Implementations must be go-routine safe since the codec can be called in
 // multiple go-routines concurrently.
 type ServerCodec interface {
+	peerInfo() PeerInfo
 	readBatch() (msgs []*jsonrpcMessage, isBatch bool, err error)
 	close()
+
 	jsonWriter
 }
 
 // jsonWriter can write JSON messages to its underlying connection.
 // Implementations must be safe for concurrent use.
 type jsonWriter interface {
-	writeJSON(context.Context, interface{}) error
+	// writeJSON writes a message to the connection.
+	writeJSON(ctx context.Context, msg interface{}, isError bool) error
+	// writeJSON writes a message to the connection with the option of skipping the deadline.
+	writeJSONSkipDeadline(ctx context.Context, msg interface{}, isError bool, skip bool) error
 	// Closed returns a channel which is closed when the connection is closed.
 	closed() <-chan interface{}
 	// RemoteAddr returns the peer address of the connection.
@@ -69,14 +72,15 @@ type jsonWriter interface {
 type BlockNumber int64
 
 const (
-	AcceptedBlockNumber = BlockNumber(-3)
-	PendingBlockNumber  = BlockNumber(-2)
-	LatestBlockNumber   = BlockNumber(-1)
-	EarliestBlockNumber = BlockNumber(0)
+	SafeBlockNumber      = BlockNumber(-4)
+	FinalizedBlockNumber = BlockNumber(-3)
+	LatestBlockNumber    = BlockNumber(-2)
+	PendingBlockNumber   = BlockNumber(-1)
+	EarliestBlockNumber  = BlockNumber(0)
 )
 
 // UnmarshalJSON parses the given JSON fragment into a BlockNumber. It supports:
-// - "latest", "earliest" or "pending" as string arguments
+// - "accepted", "safe", "finalized", "latest", "earliest" or "pending" as string arguments
 // - the block number
 // Returned errors:
 // - an invalid block number error when the given argument isn't a known strings
@@ -92,13 +96,17 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 		*bn = EarliestBlockNumber
 		return nil
 	case "latest":
-		*bn = AcceptedBlockNumber
+		*bn = LatestBlockNumber
 		return nil
 	case "pending":
 		*bn = PendingBlockNumber
 		return nil
-	case "accepted":
-		*bn = AcceptedBlockNumber
+	// Include "finalized" as an option for compatibility with FinalizedBlockNumber from geth.
+	case "accepted", "finalized":
+		*bn = FinalizedBlockNumber
+		return nil
+	case "safe":
+		*bn = SafeBlockNumber
 		return nil
 	}
 
@@ -113,8 +121,45 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Int64 returns the block number as int64.
 func (bn BlockNumber) Int64() int64 {
 	return (int64)(bn)
+}
+
+// MarshalText implements encoding.TextMarshaler. It marshals:
+// - "accepted", "latest", "earliest" or "pending" as strings
+// - other numbers as hex
+func (bn BlockNumber) MarshalText() ([]byte, error) {
+	return []byte(bn.String()), nil
+}
+
+func (bn BlockNumber) String() string {
+	switch bn {
+	case EarliestBlockNumber:
+		return "earliest"
+	case LatestBlockNumber:
+		return "latest"
+	case PendingBlockNumber:
+		return "pending"
+	case FinalizedBlockNumber:
+		return "accepted"
+	case SafeBlockNumber:
+		return "safe"
+	default:
+		if bn < 0 {
+			return fmt.Sprintf("<invalid %d>", bn)
+		}
+		return hexutil.Uint64(bn).String()
+	}
+}
+
+// IsAccepted returns true if this blockNumber should be treated as a request for the last accepted block
+func (bn BlockNumber) IsAccepted() bool {
+	return bn < EarliestBlockNumber && bn >= SafeBlockNumber
+}
+
+func (bn BlockNumber) IsLatest() bool {
+	return bn == LatestBlockNumber || bn == PendingBlockNumber
 }
 
 type BlockNumberOrHash struct {
@@ -147,15 +192,20 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 		bnh.BlockNumber = &bn
 		return nil
 	case "latest":
-		bn := AcceptedBlockNumber
+		bn := LatestBlockNumber
 		bnh.BlockNumber = &bn
 		return nil
 	case "pending":
 		bn := PendingBlockNumber
 		bnh.BlockNumber = &bn
 		return nil
-	case "accepted":
-		bn := AcceptedBlockNumber
+	// Include "finalized" as an option for compatibility with FinalizedBlockNumber from geth.
+	case "accepted", "finalized":
+		bn := FinalizedBlockNumber
+		bnh.BlockNumber = &bn
+		return nil
+	case "safe":
+		bn := SafeBlockNumber
 		bnh.BlockNumber = &bn
 		return nil
 	default:
@@ -187,6 +237,16 @@ func (bnh *BlockNumberOrHash) Number() (BlockNumber, bool) {
 		return *bnh.BlockNumber, true
 	}
 	return BlockNumber(0), false
+}
+
+func (bnh *BlockNumberOrHash) String() string {
+	if bnh.BlockNumber != nil {
+		return bnh.BlockNumber.String()
+	}
+	if bnh.BlockHash != nil {
+		return bnh.BlockHash.String()
+	}
+	return "nil"
 }
 
 func (bnh *BlockNumberOrHash) Hash() (common.Hash, bool) {

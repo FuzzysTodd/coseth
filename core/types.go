@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2015 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -34,18 +44,10 @@ type Validator interface {
 	ValidateState(block *types.Block, state *state.StateDB, receipts types.Receipts, usedGas uint64) error
 }
 
-// Prefetcher is an interface for pre-caching transaction signatures and state.
-type Prefetcher interface {
-	// Prefetch processes the state changes according to the Ethereum rules by running
-	// the transaction messages using the statedb, but any changes are discarded. The
-	// only goal is to pre-cache transaction signatures and state trie nodes.
-	Prefetch(block *types.Block, statedb *state.StateDB, cfg vm.Config, interrupt *uint32)
-}
-
 // Processor is an interface for processing blocks using a given initial state.
 type Processor interface {
 	// Process processes the state changes according to the Ethereum rules by running
 	// the transaction messages using the statedb and applying any rewards to both
 	// the processor (coinbase) and any included uncles.
-	Process(block *types.Block, statedb *state.StateDB, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error)
+	Process(block *types.Block, parent *types.Header, statedb *state.StateDB, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error)
 }

@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2014 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -17,7 +27,6 @@
 package vm
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -54,10 +63,6 @@ func (st *Stack) push(d *uint256.Int) {
 	// NOTE push limit (1024) is checked in baseCheck
 	st.data = append(st.data, *d)
 }
-func (st *Stack) pushN(ds ...uint256.Int) {
-	// FIXME: Is there a way to pass args by pointers.
-	st.data = append(st.data, ds...)
-}
 
 func (st *Stack) pop() (ret uint256.Int) {
 	ret = st.data[len(st.data)-1]
@@ -84,48 +89,4 @@ func (st *Stack) peek() *uint256.Int {
 // Back returns the n'th item in stack
 func (st *Stack) Back(n int) *uint256.Int {
 	return &st.data[st.len()-n-1]
-}
-
-// Print dumps the content of the stack
-func (st *Stack) Print() {
-	fmt.Println("### stack ###")
-	if len(st.data) > 0 {
-		for i, val := range st.data {
-			fmt.Printf("%-3d  %v\n", i, val)
-		}
-	} else {
-		fmt.Println("-- empty --")
-	}
-	fmt.Println("#############")
-}
-
-var rStackPool = sync.Pool{
-	New: func() interface{} {
-		return &ReturnStack{data: make([]uint32, 0, 10)}
-	},
-}
-
-// ReturnStack is an object for basic return stack operations.
-type ReturnStack struct {
-	data []uint32
-}
-
-func newReturnStack() *ReturnStack {
-	return rStackPool.Get().(*ReturnStack)
-}
-
-func returnRStack(rs *ReturnStack) {
-	rs.data = rs.data[:0]
-	rStackPool.Put(rs)
-}
-
-func (st *ReturnStack) push(d uint32) {
-	st.data = append(st.data, d)
-}
-
-// A uint32 is sufficient as for code below 4.2G
-func (st *ReturnStack) pop() (ret uint32) {
-	ret = st.data[len(st.data)-1]
-	st.data = st.data[:len(st.data)-1]
-	return
 }

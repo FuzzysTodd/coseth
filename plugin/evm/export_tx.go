@@ -4,27 +4,40 @@
 package evm
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"github.com/ava-labs/coreth/core/vm"
 	"math/big"
 
-	"github.com/ava-labs/coreth/core/state"
+	"github.com/ava-labs/coreth/params"
 
 	"github.com/ava-labs/avalanchego/chains/atomic"
-	"github.com/ava-labs/avalanchego/database"
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ava-labs/avalanchego/snow"
-	"github.com/ava-labs/avalanchego/utils/crypto"
-	safemath "github.com/ava-labs/avalanchego/utils/math"
+	"github.com/ava-labs/avalanchego/utils"
+	"github.com/ava-labs/avalanchego/utils/constants"
+	"github.com/ava-labs/avalanchego/utils/crypto/secp256k1"
+	"github.com/ava-labs/avalanchego/utils/math"
+	"github.com/ava-labs/avalanchego/utils/set"
+	"github.com/ava-labs/avalanchego/utils/wrappers"
 	"github.com/ava-labs/avalanchego/vms/components/avax"
+	"github.com/ava-labs/avalanchego/vms/components/verify"
 	"github.com/ava-labs/avalanchego/vms/secp256k1fx"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
+)
+
+var (
+	_                           UnsignedAtomicTx       = &UnsignedExportTx{}
+	_                           secp256k1fx.UnsignedTx = &UnsignedExportTx{}
+	errExportNonAVAXInputBanff                         = errors.New("export input cannot contain non-AVAX in Banff")
+	errExportNonAVAXOutputBanff                        = errors.New("export output cannot contain non-AVAX in Banff")
 )
 
 // UnsignedExportTx is an unsigned ExportTx
 type UnsignedExportTx struct {
-	avax.Metadata
-	// true iff this transaction has already passed syntactic verification
-	syntacticallyVerified bool
+	Metadata
 	// ID of the network on which this tx was issued
 	NetworkID uint32 `serialize:"true" json:"networkID"`
 	// ID of this blockchain.
@@ -37,110 +50,204 @@ type UnsignedExportTx struct {
 	ExportedOutputs []*avax.TransferableOutput `serialize:"true" json:"exportedOutputs"`
 }
 
-// InputUTXOs returns an empty set
-func (tx *UnsignedExportTx) InputUTXOs() ids.Set { return ids.Set{} }
+// InputUTXOs returns a set of all the hash(address:nonce) exporting funds.
+func (utx *UnsignedExportTx) InputUTXOs() set.Set[ids.ID] {
+	set := set.NewSet[ids.ID](len(utx.Ins))
+	for _, in := range utx.Ins {
+		// Total populated bytes is exactly 32 bytes.
+		// 8 (Nonce) + 4 (Address Length) + 20 (Address)
+		var rawID [32]byte
+		packer := wrappers.Packer{Bytes: rawID[:]}
+		packer.PackLong(in.Nonce)
+		packer.PackBytes(in.Address.Bytes())
+		set.Add(ids.ID(rawID))
+	}
+	return set
+}
 
 // Verify this transaction is well-formed
-func (tx *UnsignedExportTx) Verify(
-	avmID ids.ID,
+func (utx *UnsignedExportTx) Verify(
 	ctx *snow.Context,
-	feeAmount uint64,
-	feeAssetID ids.ID,
+	rules params.Rules,
 ) error {
 	switch {
-	case tx == nil:
+	case utx == nil:
 		return errNilTx
-	case tx.syntacticallyVerified: // already passed syntactic verification
-		return nil
-	case tx.DestinationChain.IsZero():
-		return errWrongChainID
-	case !tx.DestinationChain.Equals(avmID):
-		return errWrongChainID
-	case len(tx.ExportedOutputs) == 0:
+	case len(utx.ExportedOutputs) == 0:
 		return errNoExportOutputs
-	case tx.NetworkID != ctx.NetworkID:
+	case utx.NetworkID != ctx.NetworkID:
 		return errWrongNetworkID
-	case !ctx.ChainID.Equals(tx.BlockchainID):
+	case ctx.ChainID != utx.BlockchainID:
 		return errWrongBlockchainID
 	}
 
-	for _, in := range tx.Ins {
+	// Make sure that the tx has a valid peer chain ID
+	if rules.IsApricotPhase5 {
+		// Note that SameSubnet verifies that [tx.DestinationChain] isn't this
+		// chain's ID
+		if err := verify.SameSubnet(context.TODO(), ctx, utx.DestinationChain); err != nil {
+			return errWrongChainID
+		}
+	} else {
+		if utx.DestinationChain != ctx.XChainID {
+			return errWrongChainID
+		}
+	}
+
+	for _, in := range utx.Ins {
 		if err := in.Verify(); err != nil {
 			return err
 		}
+		if rules.IsBanff && in.AssetID != ctx.AVAXAssetID {
+			return errExportNonAVAXInputBanff
+		}
 	}
 
-	for _, out := range tx.ExportedOutputs {
+	for _, out := range utx.ExportedOutputs {
 		if err := out.Verify(); err != nil {
 			return err
 		}
+		assetID := out.AssetID()
+		if assetID != ctx.AVAXAssetID && utx.DestinationChain == constants.PlatformChainID {
+			return errWrongChainID
+		}
+		if rules.IsBanff && assetID != ctx.AVAXAssetID {
+			return errExportNonAVAXOutputBanff
+		}
 	}
-	if !avax.IsSortedTransferableOutputs(tx.ExportedOutputs, Codec) {
+	if !avax.IsSortedTransferableOutputs(utx.ExportedOutputs, Codec) {
 		return errOutputsNotSorted
 	}
+	if rules.IsApricotPhase1 && !utils.IsSortedAndUnique(utx.Ins) {
+		return errInputsNotSortedUnique
+	}
 
-	tx.syntacticallyVerified = true
 	return nil
 }
 
+func (utx *UnsignedExportTx) GasUsed(fixedFee bool) (uint64, error) {
+	byteCost := calcBytesCost(len(utx.Bytes()))
+	numSigs := uint64(len(utx.Ins))
+	sigCost, err := math.Mul64(numSigs, secp256k1fx.CostPerSignature)
+	if err != nil {
+		return 0, err
+	}
+	cost, err := math.Add64(byteCost, sigCost)
+	if err != nil {
+		return 0, err
+	}
+	if fixedFee {
+		cost, err = math.Add64(cost, params.AtomicTxBaseCost)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	return cost, nil
+}
+
+// Amount of [assetID] burned by this transaction
+func (utx *UnsignedExportTx) Burned(assetID ids.ID) (uint64, error) {
+	var (
+		spent uint64
+		input uint64
+		err   error
+	)
+	for _, out := range utx.ExportedOutputs {
+		if out.AssetID() == assetID {
+			spent, err = math.Add64(spent, out.Output().Amount())
+			if err != nil {
+				return 0, err
+			}
+		}
+	}
+	for _, in := range utx.Ins {
+		if in.AssetID == assetID {
+			input, err = math.Add64(input, in.Amount)
+			if err != nil {
+				return 0, err
+			}
+		}
+	}
+
+	return math.Sub(input, spent)
+}
+
 // SemanticVerify this transaction is valid.
-func (tx *UnsignedExportTx) SemanticVerify(
+func (utx *UnsignedExportTx) SemanticVerify(
 	vm *VM,
 	stx *Tx,
-) TxError {
-	if err := tx.Verify(vm.ctx.XChainID, vm.ctx, vm.txFee, vm.ctx.AVAXAssetID); err != nil {
-		return permError{err}
+	_ *Block,
+	baseFee *big.Int,
+	rules params.Rules,
+) error {
+	if err := utx.Verify(vm.ctx, rules); err != nil {
+		return err
 	}
 
-	if len(tx.Ins) != len(stx.Creds) {
-		return permError{errSignatureInputsMismatch}
-	}
-
-	f := crypto.FactorySECP256K1R{}
-	for i, input := range tx.Ins {
-		cred := stx.Creds[i].(*secp256k1fx.Credential)
-		if err := cred.Verify(); err != nil {
-			return permError{err}
-		}
-
-		if len(cred.Sigs) != 1 {
-			return permError{fmt.Errorf("expected one signature for EVM Input Credential, but found: %d", len(cred.Sigs))}
-		}
-		pubKey, err := f.RecoverPublicKey(tx.UnsignedBytes(), cred.Sigs[0][:])
-		if err != nil {
-			return permError{err}
-		}
-		if input.Address != PublicKeyToEthAddress(pubKey) {
-			return permError{errPublicKeySignatureMismatch}
-		}
-	}
-
-	// do flow-checking
+	// Check the transaction consumes and produces the right amounts
 	fc := avax.NewFlowChecker()
-	fc.Produce(vm.ctx.AVAXAssetID, vm.txFee)
-
-	for _, out := range tx.ExportedOutputs {
+	switch {
+	// Apply dynamic fees to export transactions as of Apricot Phase 3
+	case rules.IsApricotPhase3:
+		gasUsed, err := stx.GasUsed(rules.IsApricotPhase5)
+		if err != nil {
+			return err
+		}
+		txFee, err := CalculateDynamicFee(gasUsed, baseFee)
+		if err != nil {
+			return err
+		}
+		fc.Produce(vm.ctx.AVAXAssetID, txFee)
+	// Apply fees to export transactions before Apricot Phase 3
+	default:
+		fc.Produce(vm.ctx.AVAXAssetID, params.AvalancheAtomicTxFee)
+	}
+	for _, out := range utx.ExportedOutputs {
 		fc.Produce(out.AssetID(), out.Output().Amount())
 	}
-
-	for _, in := range tx.Ins {
+	for _, in := range utx.Ins {
 		fc.Consume(in.AssetID, in.Amount)
 	}
 
 	if err := fc.Verify(); err != nil {
-		return permError{err}
+		return fmt.Errorf("export tx flow check failed due to: %w", err)
 	}
 
-	// TODO: verify UTXO outputs via gRPC
+	if len(utx.Ins) != len(stx.Creds) {
+		return fmt.Errorf("export tx contained mismatched number of inputs/credentials (%d vs. %d)", len(utx.Ins), len(stx.Creds))
+	}
+
+	for i, input := range utx.Ins {
+		cred, ok := stx.Creds[i].(*secp256k1fx.Credential)
+		if !ok {
+			return fmt.Errorf("expected *secp256k1fx.Credential but got %T", cred)
+		}
+		if err := cred.Verify(); err != nil {
+			return err
+		}
+
+		if len(cred.Sigs) != 1 {
+			return fmt.Errorf("expected one signature for EVM Input Credential, but found: %d", len(cred.Sigs))
+		}
+		pubKey, err := vm.secpCache.RecoverPublicKey(utx.Bytes(), cred.Sigs[0][:])
+		if err != nil {
+			return err
+		}
+		if input.Address != PublicKeyToEthAddress(pubKey) {
+			return errPublicKeySignatureMismatch
+		}
+	}
+
 	return nil
 }
 
-// Accept this transaction.
-func (tx *UnsignedExportTx) Accept(ctx *snow.Context, _ database.Batch) error {
-	txID := tx.ID()
+// AtomicOps returns the atomic operations for this transaction.
+func (utx *UnsignedExportTx) AtomicOps() (ids.ID, *atomic.Requests, error) {
+	txID := utx.ID()
 
-	elems := make([]*atomic.Element, len(tx.ExportedOutputs))
-	for i, out := range tx.ExportedOutputs {
+	elems := make([]*atomic.Element, len(utx.ExportedOutputs))
+	for i, out := range utx.ExportedOutputs {
 		utxo := &avax.UTXO{
 			UTXOID: avax.UTXOID{
 				TxID:        txID,
@@ -150,13 +257,13 @@ func (tx *UnsignedExportTx) Accept(ctx *snow.Context, _ database.Batch) error {
 			Out:   out.Out,
 		}
 
-		utxoBytes, err := Codec.Marshal(utxo)
+		utxoBytes, err := Codec.Marshal(codecVersion, utxo)
 		if err != nil {
-			return err
+			return ids.ID{}, nil, err
 		}
-
+		utxoID := utxo.InputID()
 		elem := &atomic.Element{
-			Key:   utxo.InputID().Bytes(),
+			Key:   utxoID[:],
 			Value: utxoBytes,
 		}
 		if out, ok := utxo.Out.(avax.Addressable); ok {
@@ -166,7 +273,7 @@ func (tx *UnsignedExportTx) Accept(ctx *snow.Context, _ database.Batch) error {
 		elems[i] = elem
 	}
 
-	return ctx.SharedMemory.Put(tx.DestinationChain, elems)
+	return utx.DestinationChain, &atomic.Requests{PutRequests: elems}, nil
 }
 
 // newExportTx returns a new ExportTx
@@ -175,39 +282,10 @@ func (vm *VM) newExportTx(
 	amount uint64, // Amount of tokens to export
 	chainID ids.ID, // Chain to send the UTXOs to
 	to ids.ShortID, // Address of chain recipient
-	keys []*crypto.PrivateKeySECP256K1R, // Pay the fee and provide the tokens
+	baseFee *big.Int, // fee to use post-AP3
+	keys []*secp256k1.PrivateKey, // Pay the fee and provide the tokens
 ) (*Tx, error) {
-	if !vm.ctx.XChainID.Equals(chainID) {
-		return nil, errWrongChainID
-	}
-
-	var toBurn uint64
-	var err error
-	if assetID.Equals(vm.ctx.AVAXAssetID) {
-		toBurn, err = safemath.Add64(amount, vm.txFee)
-		if err != nil {
-			return nil, errOverflowExport
-		}
-	} else {
-		toBurn = vm.txFee
-	}
-	// burn AVAX
-	ins, signers, err := vm.GetSpendableFunds(keys, vm.ctx.AVAXAssetID, toBurn)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't generate tx inputs/outputs: %w", err)
-	}
-
-	// burn non-AVAX
-	if !assetID.Equals(vm.ctx.AVAXAssetID) {
-		ins2, signers2, err := vm.GetSpendableFunds(keys, assetID, amount)
-		if err != nil {
-			return nil, fmt.Errorf("couldn't generate tx inputs/outputs: %w", err)
-		}
-		ins = append(ins, ins2...)
-		signers = append(signers, signers2...)
-	}
-
-	exportOuts := []*avax.TransferableOutput{{ // Exported to X-Chain
+	outs := []*avax.TransferableOutput{{
 		Asset: avax.Asset{ID: assetID},
 		Out: &secp256k1fx.TransferOutput{
 			Amt: amount,
@@ -219,7 +297,60 @@ func (vm *VM) newExportTx(
 		},
 	}}
 
-	avax.SortTransferableOutputs(exportOuts, vm.codec)
+	var (
+		avaxNeeded           uint64 = 0
+		ins, avaxIns         []EVMInput
+		signers, avaxSigners [][]*secp256k1.PrivateKey
+		err                  error
+	)
+
+	// consume non-AVAX
+	if assetID != vm.ctx.AVAXAssetID {
+		ins, signers, err = vm.GetSpendableFunds(keys, assetID, amount)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't generate tx inputs/signers: %w", err)
+		}
+	} else {
+		avaxNeeded = amount
+	}
+
+	rules := vm.currentRules()
+	switch {
+	case rules.IsApricotPhase3:
+		utx := &UnsignedExportTx{
+			NetworkID:        vm.ctx.NetworkID,
+			BlockchainID:     vm.ctx.ChainID,
+			DestinationChain: chainID,
+			Ins:              ins,
+			ExportedOutputs:  outs,
+		}
+		tx := &Tx{UnsignedAtomicTx: utx}
+		if err := tx.Sign(vm.codec, nil); err != nil {
+			return nil, err
+		}
+
+		var cost uint64
+		cost, err = tx.GasUsed(rules.IsApricotPhase5)
+		if err != nil {
+			return nil, err
+		}
+
+		avaxIns, avaxSigners, err = vm.GetSpendableAVAXWithFee(keys, avaxNeeded, cost, baseFee)
+	default:
+		var newAvaxNeeded uint64
+		newAvaxNeeded, err = math.Add64(avaxNeeded, params.AvalancheAtomicTxFee)
+		if err != nil {
+			return nil, errOverflowExport
+		}
+		avaxIns, avaxSigners, err = vm.GetSpendableFunds(keys, vm.ctx.AVAXAssetID, newAvaxNeeded)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("couldn't generate tx inputs/signers: %w", err)
+	}
+	ins = append(ins, avaxIns...)
+	signers = append(signers, avaxSigners...)
+
+	avax.SortTransferableOutputs(outs, vm.codec)
 	SortEVMInputsAndSigners(ins, signers)
 
 	// Create the transaction
@@ -228,21 +359,23 @@ func (vm *VM) newExportTx(
 		BlockchainID:     vm.ctx.ChainID,
 		DestinationChain: chainID,
 		Ins:              ins,
-		ExportedOutputs:  exportOuts,
+		ExportedOutputs:  outs,
 	}
-	tx := &Tx{UnsignedTx: utx}
+	tx := &Tx{UnsignedAtomicTx: utx}
 	if err := tx.Sign(vm.codec, signers); err != nil {
 		return nil, err
 	}
-	return tx, utx.Verify(vm.ctx.XChainID, vm.ctx, vm.txFee, vm.ctx.AVAXAssetID)
+	return tx, utx.Verify(vm.ctx, vm.currentRules())
 }
 
 // EVMStateTransfer executes the state update from the atomic export transaction
-func (tx *UnsignedExportTx) EVMStateTransfer(vm *VM, state *state.StateDB) error {
+func (utx *UnsignedExportTx) EVMStateTransfer(ctx *snow.Context, state vm.StateDB) error {
 	addrs := map[[20]byte]uint64{}
-	for _, from := range tx.Ins {
-		log.Info("crosschain C->X", "addr", from.Address, "amount", from.Amount)
-		if from.AssetID.Equals(vm.ctx.AVAXAssetID) {
+	for _, from := range utx.Ins {
+		if from.AssetID == ctx.AVAXAssetID {
+			log.Debug("crosschain", "dest", utx.DestinationChain, "addr", from.Address, "amount", from.Amount, "assetID", "AVAX")
+			// We multiply the input amount by x2cRate to convert AVAX back to the appropriate
+			// denomination before export.
 			amount := new(big.Int).Mul(
 				new(big.Int).SetUint64(from.Amount), x2cRate)
 			if state.GetBalance(from.Address).Cmp(amount) < 0 {
@@ -250,12 +383,12 @@ func (tx *UnsignedExportTx) EVMStateTransfer(vm *VM, state *state.StateDB) error
 			}
 			state.SubBalance(from.Address, amount)
 		} else {
+			log.Debug("crosschain", "dest", utx.DestinationChain, "addr", from.Address, "amount", from.Amount, "assetID", from.AssetID)
 			amount := new(big.Int).SetUint64(from.Amount)
-			assetID := from.AssetID.Key()
-			if state.GetBalanceMultiCoin(from.Address, assetID).Cmp(amount) < 0 {
+			if state.GetBalanceMultiCoin(from.Address, common.Hash(from.AssetID)).Cmp(amount) < 0 {
 				return errInsufficientFunds
 			}
-			state.SubBalanceMultiCoin(from.Address, assetID, amount)
+			state.SubBalanceMultiCoin(from.Address, common.Hash(from.AssetID), amount)
 		}
 		if state.GetNonce(from.Address) != from.Nonce {
 			return errInvalidNonce

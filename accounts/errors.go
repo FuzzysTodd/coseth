@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2017 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -41,8 +51,7 @@ var ErrInvalidPassphrase = errors.New("invalid password")
 // second time.
 var ErrWalletAlreadyOpen = errors.New("wallet already open")
 
-// ErrWalletClosed is returned if a wallet is attempted to be opened the
-// secodn time.
+// ErrWalletClosed is returned if a wallet is offline.
 var ErrWalletClosed = errors.New("wallet closed")
 
 // AuthNeededError is returned by backends for signing requests where the user

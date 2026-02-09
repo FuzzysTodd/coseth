@@ -6,58 +6,59 @@ package evm
 import (
 	"errors"
 
-	"github.com/ethereum/go-ethereum/ethdb"
-
 	"github.com/ava-labs/avalanchego/database"
+	"github.com/ethereum/go-ethereum/ethdb"
 )
 
 var (
-	errOpNotSupported = errors.New("this operation is not supported")
+	_ ethdb.KeyValueStore = &Database{}
+
+	ErrSnapshotNotSupported = errors.New("snapshot is not supported")
 )
 
 // Database implements ethdb.Database
 type Database struct{ database.Database }
 
-// HasAncient returns an error as we don't have a backing chain freezer.
-func (db Database) HasAncient(kind string, number uint64) (bool, error) {
-	return false, errOpNotSupported
-}
-
-// Ancient returns an error as we don't have a backing chain freezer.
-func (db Database) Ancient(kind string, number uint64) ([]byte, error) { return nil, errOpNotSupported }
-
-// Ancients returns an error as we don't have a backing chain freezer.
-func (db Database) Ancients() (uint64, error) { return 0, errOpNotSupported }
-
-// AncientSize returns an error as we don't have a backing chain freezer.
-func (db Database) AncientSize(kind string) (uint64, error) { return 0, errOpNotSupported }
-
-// AppendAncient returns an error as we don't have a backing chain freezer.
-func (db Database) AppendAncient(number uint64, hash, header, body, receipts, td []byte) error {
-	return errOpNotSupported
-}
-
-// TruncateAncients returns an error as we don't have a backing chain freezer.
-func (db Database) TruncateAncients(items uint64) error { return errOpNotSupported }
-
-// Sync returns an error as we don't have a backing chain freezer.
-func (db Database) Sync() error { return errOpNotSupported }
+// Stat implements ethdb.Database
+func (db Database) Stat(string) (string, error) { return "", database.ErrNotFound }
 
 // NewBatch implements ethdb.Database
 func (db Database) NewBatch() ethdb.Batch { return Batch{db.Database.NewBatch()} }
 
+// NewBatchWithSize implements ethdb.Database
+// TODO: propagate size through avalanchego Database interface
+func (db Database) NewBatchWithSize(size int) ethdb.Batch { return Batch{db.Database.NewBatch()} }
+
+func (db Database) NewSnapshot() (ethdb.Snapshot, error) {
+	return nil, ErrSnapshotNotSupported
+}
+
 // NewIterator implements ethdb.Database
+//
+// Note: This method assumes that the prefix is NOT part of the start, so there's
+// no need for the caller to prepend the prefix to the start.
 func (db Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
-	return db.NewIteratorWithStartAndPrefix(start, prefix)
+	// avalanchego's database implementation assumes that the prefix is part of the
+	// start, so it is added here (if it is provided).
+	if len(prefix) > 0 {
+		newStart := make([]byte, len(prefix)+len(start))
+		copy(newStart, prefix)
+		copy(newStart[len(prefix):], start)
+		start = newStart
+	}
+	return db.Database.NewIteratorWithStartAndPrefix(start, prefix)
 }
 
 // NewIteratorWithStart implements ethdb.Database
 func (db Database) NewIteratorWithStart(start []byte) ethdb.Iterator {
-	return db.NewIteratorWithStart(start)
+	return db.Database.NewIteratorWithStart(start)
 }
 
 // Batch implements ethdb.Batch
 type Batch struct{ database.Batch }
+
+// ValueSize implements ethdb.Batch
+func (batch Batch) ValueSize() int { return batch.Batch.Size() }
 
 // Replay implements ethdb.Batch
 func (batch Batch) Replay(w ethdb.KeyValueWriter) error { return batch.Batch.Replay(w) }

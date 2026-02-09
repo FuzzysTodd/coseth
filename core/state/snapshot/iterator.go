@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2019 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -133,7 +143,7 @@ func (it *diffAccountIterator) Hash() common.Hash {
 
 // Account returns the RLP encoded slim account the iterator is currently at.
 // This method may _fail_, if the underlying layer has been flattened between
-// the call to Next and Acccount. That type of error will set it.Err.
+// the call to Next and Account. That type of error will set it.Err.
 // This method assumes that flattening does not delete elements from
 // the accountdata mapping (writing nil into it is fine though), and will panic
 // if elements have been deleted.
@@ -243,7 +253,7 @@ type diffStorageIterator struct {
 }
 
 // StorageIterator creates a storage iterator over a single diff layer.
-// Execept the storage iterator is returned, there is an additional flag
+// Except the storage iterator is returned, there is an additional flag
 // "destructed" returned. If it's true then it means the whole storage is
 // destructed in this layer(maybe recreated too), don't bother deeper layer
 // for storage retrieval.
@@ -341,10 +351,16 @@ type diskStorageIterator struct {
 // is always false.
 func (dl *diskLayer) StorageIterator(account common.Hash, seek common.Hash) (StorageIterator, bool) {
 	pos := common.TrimRightZeroes(seek[:])
+
+	// create prefix to be rawdb.SnapshotStoragePrefix + account[:]
+	prefix := make([]byte, len(rawdb.SnapshotStoragePrefix)+common.HashLength)
+	copy(prefix, rawdb.SnapshotStoragePrefix)
+	copy(prefix[len(rawdb.SnapshotStoragePrefix):], account[:])
+
 	return &diskStorageIterator{
 		layer:   dl,
 		account: account,
-		it:      dl.diskdb.NewIterator(append(rawdb.SnapshotStoragePrefix, account.Bytes()...), pos),
+		it:      dl.diskdb.NewIterator(prefix, pos),
 	}, false
 }
 
@@ -385,7 +401,7 @@ func (it *diskStorageIterator) Hash() common.Hash {
 	return common.BytesToHash(it.it.Key()) // The prefix will be truncated
 }
 
-// Slot returns the raw strorage slot content the iterator is currently at.
+// Slot returns the raw storage slot content the iterator is currently at.
 func (it *diskStorageIterator) Slot() []byte {
 	return it.it.Value()
 }

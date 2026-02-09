@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2017 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -16,7 +26,7 @@
 
 package vm
 
-func memorySha3(stack *Stack) (uint64, bool) {
+func memoryKeccak256(stack *Stack) (uint64, bool) {
 	return calcMemSize64(stack.Back(0), stack.Back(1))
 }
 
@@ -46,6 +56,14 @@ func memoryMStore8(stack *Stack) (uint64, bool) {
 
 func memoryMStore(stack *Stack) (uint64, bool) {
 	return calcMemSize64WithUint(stack.Back(0), 32)
+}
+
+func memoryMcopy(stack *Stack) (uint64, bool) {
+	mStart := stack.Back(0) // stack[0]: dest
+	if stack.Back(1).Gt(mStart) {
+		mStart = stack.Back(1) // stack[1]: source
+	}
+	return calcMemSize64(mStart, stack.Back(2)) // stack[2]: length
 }
 
 func memoryCreate(stack *Stack) (uint64, bool) {

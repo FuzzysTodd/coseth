@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2016 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -32,9 +42,18 @@ import (
 )
 
 var (
-	// ErrNotificationsUnsupported is returned when the connection doesn't support notifications
-	ErrNotificationsUnsupported = errors.New("notifications not supported")
-	// ErrNotificationNotFound is returned when the notification for the given id is not found
+	// ErrNotificationsUnsupported is returned by the client when the connection doesn't
+	// support notifications. You can use this error value to check for subscription
+	// support like this:
+	//
+	//	sub, err := client.EthSubscribe(ctx, channel, "newHeads", true)
+	//	if errors.Is(err, rpc.ErrNotificationsUnsupported) {
+	//		// Server does not support subscriptions, fall back to polling.
+	//	}
+	//
+	ErrNotificationsUnsupported = notificationsUnsupportedError{}
+
+	// ErrSubscriptionNotFound is returned when the notification for the given id is not found
 	ErrSubscriptionNotFound = errors.New("subscription not found")
 )
 
@@ -96,7 +115,7 @@ type Notifier struct {
 
 	mu           sync.Mutex
 	sub          *Subscription
-	buffer       []json.RawMessage
+	buffer       []any
 	callReturned bool
 	activated    bool
 }
@@ -120,12 +139,7 @@ func (n *Notifier) CreateSubscription() *Subscription {
 
 // Notify sends a notification to the client with the given data as payload.
 // If an error occurs the RPC connection is closed and the error is returned.
-func (n *Notifier) Notify(id ID, data interface{}) error {
-	enc, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-
+func (n *Notifier) Notify(id ID, data any) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -135,9 +149,9 @@ func (n *Notifier) Notify(id ID, data interface{}) error {
 		panic("Notify with wrong ID")
 	}
 	if n.activated {
-		return n.send(n.sub, enc)
+		return n.send(n.sub, data)
 	}
-	n.buffer = append(n.buffer, enc)
+	n.buffer = append(n.buffer, data)
 	return nil
 }
 
@@ -172,14 +186,16 @@ func (n *Notifier) activate() error {
 	return nil
 }
 
-func (n *Notifier) send(sub *Subscription, data json.RawMessage) error {
-	params, _ := json.Marshal(&subscriptionResult{ID: string(sub.ID), Result: data})
-	ctx := context.Background()
-	return n.h.conn.writeJSON(ctx, &jsonrpcMessage{
+func (n *Notifier) send(sub *Subscription, data any) error {
+	msg := jsonrpcSubscriptionNotification{
 		Version: vsn,
 		Method:  n.namespace + notificationMethodSuffix,
-		Params:  params,
-	})
+		Params: subscriptionResultEnc{
+			ID:     string(sub.ID),
+			Result: data,
+		},
+	}
+	return n.h.conn.writeJSON(context.Background(), &msg, false)
 }
 
 // A Subscription is created by a notifier and tied to that notifier. The client can use
@@ -208,23 +224,37 @@ type ClientSubscription struct {
 	channel   reflect.Value
 	namespace string
 	subid     string
-	in        chan json.RawMessage
 
-	quitOnce sync.Once     // ensures quit is closed once
-	quit     chan struct{} // quit is closed when the subscription exits
-	errOnce  sync.Once     // ensures err is closed once
-	err      chan error
+	// The in channel receives notification values from client dispatcher.
+	in chan json.RawMessage
+
+	// The error channel receives the error from the forwarding loop.
+	// It is closed by Unsubscribe.
+	err     chan error
+	errOnce sync.Once
+
+	// Closing of the subscription is requested by sending on 'quit'. This is handled by
+	// the forwarding loop, which closes 'forwardDone' when it has stopped sending to
+	// sub.channel. Finally, 'unsubDone' is closed after unsubscribing on the server side.
+	quit        chan error
+	forwardDone chan struct{}
+	unsubDone   chan struct{}
 }
+
+// This is the sentinel value sent on sub.quit when Unsubscribe is called.
+var errUnsubscribed = errors.New("unsubscribed")
 
 func newClientSubscription(c *Client, namespace string, channel reflect.Value) *ClientSubscription {
 	sub := &ClientSubscription{
-		client:    c,
-		namespace: namespace,
-		etype:     channel.Type().Elem(),
-		channel:   channel,
-		quit:      make(chan struct{}),
-		err:       make(chan error, 1),
-		in:        make(chan json.RawMessage),
+		client:      c,
+		namespace:   namespace,
+		etype:       channel.Type().Elem(),
+		channel:     channel,
+		in:          make(chan json.RawMessage),
+		quit:        make(chan error),
+		forwardDone: make(chan struct{}),
+		unsubDone:   make(chan struct{}),
+		err:         make(chan error, 1),
 	}
 	return sub
 }
@@ -232,9 +262,9 @@ func newClientSubscription(c *Client, namespace string, channel reflect.Value) *
 // Err returns the subscription error channel. The intended use of Err is to schedule
 // resubscription when the client connection is closed unexpectedly.
 //
-// The error channel receives a value when the subscription has ended due
-// to an error. The received error is nil if Close has been called
-// on the underlying client and no other error has occurred.
+// The error channel receives a value when the subscription has ended due to an error. The
+// received error is nil if Close has been called on the underlying client and no other
+// error has occurred.
 //
 // The error channel is closed when Unsubscribe is called on the subscription.
 func (sub *ClientSubscription) Err() <-chan error {
@@ -244,41 +274,63 @@ func (sub *ClientSubscription) Err() <-chan error {
 // Unsubscribe unsubscribes the notification and closes the error channel.
 // It can safely be called more than once.
 func (sub *ClientSubscription) Unsubscribe() {
-	sub.quitWithError(true, nil)
-	sub.errOnce.Do(func() { close(sub.err) })
-}
-
-func (sub *ClientSubscription) quitWithError(unsubscribeServer bool, err error) {
-	sub.quitOnce.Do(func() {
-		// The dispatch loop won't be able to execute the unsubscribe call
-		// if it is blocked on deliver. Close sub.quit first because it
-		// unblocks deliver.
-		close(sub.quit)
-		if unsubscribeServer {
-			sub.requestUnsubscribe()
+	sub.errOnce.Do(func() {
+		select {
+		case sub.quit <- errUnsubscribed:
+			<-sub.unsubDone
+		case <-sub.unsubDone:
 		}
-		if err != nil {
-			if err == ErrClientQuit {
-				err = nil // Adhere to subscription semantics.
-			}
-			sub.err <- err
-		}
+		close(sub.err)
 	})
 }
 
+// deliver is called by the client's message dispatcher to send a notification value.
 func (sub *ClientSubscription) deliver(result json.RawMessage) (ok bool) {
 	select {
 	case sub.in <- result:
 		return true
-	case <-sub.quit:
+	case <-sub.forwardDone:
 		return false
 	}
 }
 
-func (sub *ClientSubscription) start() {
-	sub.quitWithError(sub.forward())
+// close is called by the client's message dispatcher when the connection is closed.
+func (sub *ClientSubscription) close(err error) {
+	select {
+	case sub.quit <- err:
+	case <-sub.forwardDone:
+	}
 }
 
+// run is the forwarding loop of the subscription. It runs in its own goroutine and
+// is launched by the client's handler after the subscription has been created.
+func (sub *ClientSubscription) run() {
+	defer close(sub.unsubDone)
+
+	unsubscribe, err := sub.forward()
+
+	// The client's dispatch loop won't be able to execute the unsubscribe call if it is
+	// blocked in sub.deliver() or sub.close(). Closing forwardDone unblocks them.
+	close(sub.forwardDone)
+
+	// Call the unsubscribe method on the server.
+	if unsubscribe {
+		sub.requestUnsubscribe()
+	}
+
+	// Send the error.
+	if err != nil {
+		if err == ErrClientQuit {
+			// ErrClientQuit gets here when Client.Close is called. This is reported as a
+			// nil error because it's not an error, but we can't close sub.err here.
+			err = nil
+		}
+		sub.err <- err
+	}
+}
+
+// forward is the forwarding loop. It takes in RPC notifications and sends them
+// on the subscription channel.
 func (sub *ClientSubscription) forward() (unsubscribeServer bool, err error) {
 	cases := []reflect.SelectCase{
 		{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sub.quit)},
@@ -286,7 +338,7 @@ func (sub *ClientSubscription) forward() (unsubscribeServer bool, err error) {
 		{Dir: reflect.SelectSend, Chan: sub.channel},
 	}
 	buffer := list.New()
-	defer buffer.Init()
+
 	for {
 		var chosen int
 		var recv reflect.Value
@@ -301,7 +353,15 @@ func (sub *ClientSubscription) forward() (unsubscribeServer bool, err error) {
 
 		switch chosen {
 		case 0: // <-sub.quit
-			return false, nil
+			if !recv.IsNil() {
+				err = recv.Interface().(error)
+			}
+			if err == errUnsubscribed {
+				// Exiting because Unsubscribe was called, unsubscribe on server.
+				return true, nil
+			}
+			return false, err
+
 		case 1: // <-sub.in
 			val, err := sub.unmarshal(recv.Interface().(json.RawMessage))
 			if err != nil {
@@ -311,6 +371,7 @@ func (sub *ClientSubscription) forward() (unsubscribeServer bool, err error) {
 				return true, ErrSubscriptionQueueOverflow
 			}
 			buffer.PushBack(val)
+
 		case 2: // sub.channel<-
 			cases[2].Send = reflect.Value{} // Don't hold onto the value.
 			buffer.Remove(buffer.Front())

@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2015 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -17,11 +27,13 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/ava-labs/coreth/params"
 )
 
 type (
-	executionFunc func(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error)
+	executionFunc func(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error)
 	gasFunc       func(*EVM, *Contract, *Stack, *Memory, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
 	memorySizeFunc func(*Stack) (size uint64, overflow bool)
@@ -40,12 +52,6 @@ type operation struct {
 
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
-
-	halts   bool // indicates whether the operation should halt further execution
-	jumps   bool // indicates whether the program counter should not increment
-	writes  bool // determines whether this a state modifying operation
-	reverts bool // determines whether the operation reverts state (implicitly halts)
-	returns bool // determines whether the operations sets the return data content
 }
 
 var (
@@ -56,22 +62,87 @@ var (
 	byzantiumInstructionSet        = newByzantiumInstructionSet()
 	constantinopleInstructionSet   = newConstantinopleInstructionSet()
 	istanbulInstructionSet         = newIstanbulInstructionSet()
-	yoloV1InstructionSet           = newYoloV1InstructionSet()
+	apricotPhase1InstructionSet    = newApricotPhase1InstructionSet()
+	apricotPhase2InstructionSet    = newApricotPhase2InstructionSet()
+	apricotPhase3InstructionSet    = newApricotPhase3InstructionSet()
+	durangoInstructionSet          = newDurangoInstructionSet()
+	cancunInstructionSet           = newCancunInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
 type JumpTable [256]*operation
 
-func newYoloV1InstructionSet() JumpTable {
-	instructionSet := newIstanbulInstructionSet()
-
-	enable2315(&instructionSet) // Subroutines - https://eips.ethereum.org/EIPS/eip-2315
-
-	return instructionSet
+func validate(jt JumpTable) JumpTable {
+	for i, op := range jt {
+		if op == nil {
+			panic(fmt.Sprintf("op %#x is not set", i))
+		}
+		// The interpreter has an assumption that if the memorySize function is
+		// set, then the dynamicGas function is also set. This is a somewhat
+		// arbitrary assumption, and can be removed if we need to -- but it
+		// allows us to avoid a condition check. As long as we have that assumption
+		// in there, this little sanity check prevents us from merging in a
+		// change which violates it.
+		if op.memorySize != nil && op.dynamicGas == nil {
+			panic(fmt.Sprintf("op %v has dynamic memory but not dynamic gas", OpCode(i).String()))
+		}
+	}
+	return jt
 }
 
-// newIstanbulInstructionSet returns the frontier, homestead
-// byzantium, contantinople and petersburg instructions.
+func newCancunInstructionSet() JumpTable {
+	instructionSet := newDurangoInstructionSet()
+	enable4844(&instructionSet) // EIP-4844 (BLOBHASH opcode)
+	enable7516(&instructionSet) // EIP-7516 (BLOBBASEFEE opcode)
+	enable1153(&instructionSet) // EIP-1153 "Transient Storage"
+	enable5656(&instructionSet) // EIP-5656 (MCOPY opcode)
+	enable6780(&instructionSet) // EIP-6780 SELFDESTRUCT only in same transaction
+	return validate(instructionSet)
+}
+
+// newDurangoInstructionSet returns the frontier, homestead, byzantium,
+// constantinople, istanbul, petersburg, apricotPhase1, 2, and 3, durango instructions.
+func newDurangoInstructionSet() JumpTable {
+	instructionSet := newApricotPhase3InstructionSet()
+	enable3855(&instructionSet) // PUSH0 instruction
+	enable3860(&instructionSet) // Limit and meter initcode
+
+	return validate(instructionSet)
+}
+
+// newApricotPhase3InstructionSet returns the frontier, homestead, byzantium,
+// constantinople, istanbul, petersburg, apricotPhase1, 2, and 3 instructions.
+func newApricotPhase3InstructionSet() JumpTable {
+	instructionSet := newApricotPhase2InstructionSet()
+	enable3198(&instructionSet) // Base fee opcode https://eips.ethereum.org/EIPS/eip-3198
+	return validate(instructionSet)
+}
+
+// newApricotPhase1InstructionSet returns the frontier,
+// homestead, byzantium, constantinople petersburg,
+// istanbul, and apricotPhase1 instructions.
+func newApricotPhase2InstructionSet() JumpTable {
+	instructionSet := newApricotPhase1InstructionSet()
+
+	enable2929(&instructionSet)
+	enableAP2(&instructionSet)
+
+	return validate(instructionSet)
+}
+
+// newApricotPhase1InstructionSet returns the frontier,
+// homestead, byzantium, constantinople petersburg,
+// and istanbul instructions.
+func newApricotPhase1InstructionSet() JumpTable {
+	instructionSet := newIstanbulInstructionSet()
+
+	enableAP1(&instructionSet)
+
+	return validate(instructionSet)
+}
+
+// newIstanbulInstructionSet returns the frontier,
+// homestead, byzantium, constantinople and petersburg instructions.
 func newIstanbulInstructionSet() JumpTable {
 	instructionSet := newConstantinopleInstructionSet()
 
@@ -79,11 +150,11 @@ func newIstanbulInstructionSet() JumpTable {
 	enable1884(&instructionSet) // Reprice reader opcodes - https://eips.ethereum.org/EIPS/eip-1884
 	enable2200(&instructionSet) // Net metered SSTORE - https://eips.ethereum.org/EIPS/eip-2200
 
-	return instructionSet
+	return validate(instructionSet)
 }
 
-// newConstantinopleInstructionSet returns the frontier, homestead
-// byzantium and contantinople instructions.
+// newConstantinopleInstructionSet returns the frontier, homestead,
+// byzantium and constantinople instructions.
 func newConstantinopleInstructionSet() JumpTable {
 	instructionSet := newByzantiumInstructionSet()
 	instructionSet[SHL] = &operation{
@@ -117,10 +188,8 @@ func newConstantinopleInstructionSet() JumpTable {
 		minStack:    minStack(4, 1),
 		maxStack:    maxStack(4, 1),
 		memorySize:  memoryCreate2,
-		writes:      true,
-		returns:     true,
 	}
-	return instructionSet
+	return validate(instructionSet)
 }
 
 // newByzantiumInstructionSet returns the frontier, homestead and
@@ -134,7 +203,6 @@ func newByzantiumInstructionSet() JumpTable {
 		minStack:    minStack(6, 1),
 		maxStack:    maxStack(6, 1),
 		memorySize:  memoryStaticCall,
-		returns:     true,
 	}
 	instructionSet[RETURNDATASIZE] = &operation{
 		execute:     opReturnDataSize,
@@ -156,18 +224,15 @@ func newByzantiumInstructionSet() JumpTable {
 		minStack:   minStack(2, 0),
 		maxStack:   maxStack(2, 0),
 		memorySize: memoryRevert,
-		reverts:    true,
-		returns:    true,
 	}
-	return instructionSet
+	return validate(instructionSet)
 }
 
 // EIP 158 a.k.a Spurious Dragon
 func newSpuriousDragonInstructionSet() JumpTable {
 	instructionSet := newTangerineWhistleInstructionSet()
 	instructionSet[EXP].dynamicGas = gasExpEIP158
-	return instructionSet
-
+	return validate(instructionSet)
 }
 
 // EIP 150 a.k.a Tangerine Whistle
@@ -181,7 +246,7 @@ func newTangerineWhistleInstructionSet() JumpTable {
 	instructionSet[CALLEX].constantGas = params.CallGasEIP150
 	instructionSet[CALLCODE].constantGas = params.CallGasEIP150
 	instructionSet[DELEGATECALL].constantGas = params.CallGasEIP150
-	return instructionSet
+	return validate(instructionSet)
 }
 
 // newHomesteadInstructionSet returns the frontier and homestead
@@ -195,21 +260,19 @@ func newHomesteadInstructionSet() JumpTable {
 		minStack:    minStack(6, 1),
 		maxStack:    maxStack(6, 1),
 		memorySize:  memoryDelegateCall,
-		returns:     true,
 	}
-	return instructionSet
+	return validate(instructionSet)
 }
 
 // newFrontierInstructionSet returns the frontier instructions
 // that can be executed during the frontier phase.
 func newFrontierInstructionSet() JumpTable {
-	return JumpTable{
+	tbl := JumpTable{
 		STOP: {
 			execute:     opStop,
 			constantGas: 0,
 			minStack:    minStack(0, 0),
 			maxStack:    maxStack(0, 0),
-			halts:       true,
 		},
 		ADD: {
 			execute:     opAdd,
@@ -343,13 +406,13 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
 		},
-		SHA3: {
-			execute:     opSha3,
-			constantGas: params.Sha3Gas,
-			dynamicGas:  gasSha3,
+		KECCAK256: {
+			execute:     opKeccak256,
+			constantGas: params.Keccak256Gas,
+			dynamicGas:  gasKeccak256,
 			minStack:    minStack(2, 1),
 			maxStack:    maxStack(2, 1),
-			memorySize:  memorySha3,
+			memorySize:  memoryKeccak256,
 		},
 		ADDRESS: {
 			execute:     opAddress,
@@ -518,21 +581,18 @@ func newFrontierInstructionSet() JumpTable {
 			dynamicGas: gasSStore,
 			minStack:   minStack(2, 0),
 			maxStack:   maxStack(2, 0),
-			writes:     true,
 		},
 		JUMP: {
 			execute:     opJump,
 			constantGas: GasMidStep,
 			minStack:    minStack(1, 0),
 			maxStack:    maxStack(1, 0),
-			jumps:       true,
 		},
 		JUMPI: {
 			execute:     opJumpi,
 			constantGas: GasSlowStep,
 			minStack:    minStack(2, 0),
 			maxStack:    maxStack(2, 0),
-			jumps:       true,
 		},
 		PC: {
 			execute:     opPc,
@@ -558,12 +618,6 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:    minStack(0, 0),
 			maxStack:    maxStack(0, 0),
 		},
-		//EMC: {
-		//	execute:     opEMC,
-		//	constantGas: params.EMCGas,
-		//	minStack:    minStack(0, 0),
-		//	maxStack:    maxStack(0, 0),
-		//},
 		PUSH1: {
 			execute:     opPush1,
 			constantGas: GasFastestStep,
@@ -954,7 +1008,6 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:   minStack(2, 0),
 			maxStack:   maxStack(2, 0),
 			memorySize: memoryLog,
-			writes:     true,
 		},
 		LOG1: {
 			execute:    makeLog(1),
@@ -962,7 +1015,6 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:   minStack(3, 0),
 			maxStack:   maxStack(3, 0),
 			memorySize: memoryLog,
-			writes:     true,
 		},
 		LOG2: {
 			execute:    makeLog(2),
@@ -970,7 +1022,6 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:   minStack(4, 0),
 			maxStack:   maxStack(4, 0),
 			memorySize: memoryLog,
-			writes:     true,
 		},
 		LOG3: {
 			execute:    makeLog(3),
@@ -978,7 +1029,6 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:   minStack(5, 0),
 			maxStack:   maxStack(5, 0),
 			memorySize: memoryLog,
-			writes:     true,
 		},
 		LOG4: {
 			execute:    makeLog(4),
@@ -986,7 +1036,6 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:   minStack(6, 0),
 			maxStack:   maxStack(6, 0),
 			memorySize: memoryLog,
-			writes:     true,
 		},
 		CREATE: {
 			execute:     opCreate,
@@ -995,8 +1044,6 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:    minStack(3, 1),
 			maxStack:    maxStack(3, 1),
 			memorySize:  memoryCreate,
-			writes:      true,
-			returns:     true,
 		},
 		CALL: {
 			execute:     opCall,
@@ -1005,7 +1052,6 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:    minStack(7, 1),
 			maxStack:    maxStack(7, 1),
 			memorySize:  memoryCall,
-			returns:     true,
 		},
 		CALLEX: {
 			execute:     opCallExpert,
@@ -1014,7 +1060,6 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:    minStack(9, 1),
 			maxStack:    maxStack(9, 1),
 			memorySize:  memoryCallExpert,
-			returns:     true,
 		},
 		CALLCODE: {
 			execute:     opCallCode,
@@ -1023,7 +1068,6 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:    minStack(7, 1),
 			maxStack:    maxStack(7, 1),
 			memorySize:  memoryCall,
-			returns:     true,
 		},
 		RETURN: {
 			execute:    opReturn,
@@ -1031,15 +1075,32 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:   minStack(2, 0),
 			maxStack:   maxStack(2, 0),
 			memorySize: memoryReturn,
-			halts:      true,
 		},
 		SELFDESTRUCT: {
-			execute:    opSuicide,
+			execute:    opSelfdestruct,
 			dynamicGas: gasSelfdestruct,
 			minStack:   minStack(1, 0),
 			maxStack:   maxStack(1, 0),
-			halts:      true,
-			writes:     true,
 		},
 	}
+
+	// Fill all unassigned slots with opUndefined.
+	for i, entry := range tbl {
+		if entry == nil {
+			tbl[i] = &operation{execute: opUndefined, maxStack: maxStack(0, 0)}
+		}
+	}
+
+	return validate(tbl)
+}
+
+func copyJumpTable(source *JumpTable) *JumpTable {
+	dest := *source
+	for i, op := range source {
+		if op != nil {
+			opCopy := *op
+			dest[i] = &opCopy
+		}
+	}
+	return &dest
 }

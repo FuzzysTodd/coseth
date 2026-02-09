@@ -5,21 +5,19 @@ package evm
 
 import (
 	"github.com/ava-labs/avalanchego/ids"
+	"github.com/ava-labs/avalanchego/utils/logging"
+	"github.com/ava-labs/avalanchego/vms"
 )
 
-// ID this VM should be referenced by
 var (
-	ID = ids.NewID([32]byte{'e', 'v', 'm'})
+	// ID this VM should be referenced by
+	ID = ids.ID{'e', 'v', 'm'}
+
+	_ vms.Factory = &Factory{}
 )
 
-// Factory ...
-type Factory struct {
-	Fee uint64
-}
+type Factory struct{}
 
-// New ...
-func (f *Factory) New() interface{} {
-	return &VM{
-		txFee: f.Fee,
-	}
+func (*Factory) New(logging.Logger) (interface{}, error) {
+	return &VM{}, nil
 }

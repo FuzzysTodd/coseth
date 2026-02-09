@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2015 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -47,6 +57,11 @@ func (gp *GasPool) SubGas(amount uint64) error {
 // Gas returns the amount of gas remaining in the pool.
 func (gp *GasPool) Gas() uint64 {
 	return uint64(*gp)
+}
+
+// SetGas sets the amount of gas with the provided number.
+func (gp *GasPool) SetGas(gas uint64) {
+	*(*uint64)(gp) = gas
 }
 
 func (gp *GasPool) String() string {

@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2017 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -41,12 +51,12 @@ var DefaultBaseDerivationPath = DerivationPath{0x80000000 + 44, 0x80000000 + 60,
 var LegacyLedgerBaseDerivationPath = DerivationPath{0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0}
 
 // DerivationPath represents the computer friendly version of a hierarchical
-// deterministic wallet account derivaion path.
+// deterministic wallet account derivation path.
 //
 // The BIP-32 spec https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki
 // defines derivation paths to be of the form:
 //
-//   m / purpose' / coin_type' / account' / change / address_index
+//	m / purpose' / coin_type' / account' / change / address_index
 //
 // The BIP-44 spec https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 // defines that the `purpose` be 44' (or 0x8000002C) for crypto currencies, and

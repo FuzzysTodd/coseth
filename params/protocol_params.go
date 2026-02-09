@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2015 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -16,13 +26,20 @@
 
 package params
 
-import "math/big"
+import (
+	"math/big"
+
+	"github.com/ethereum/go-ethereum/common"
+)
 
 const (
-	GasLimitBoundDivisor uint64 = 1024    // The bound divisor of the gas limit, used in update calculations.
-	MinGasLimit          uint64 = 5000    // Minimum the gas limit may ever be.
-	GenesisGasLimit      uint64 = 4712388 // Gas limit of the Genesis block.
+	GasLimitBoundDivisor uint64 = 1024               // The bound divisor of the gas limit, used in update calculations.
+	MinGasLimit          uint64 = 5000               // Minimum the gas limit may ever be.
+	MaxGasLimit          uint64 = 0x7fffffffffffffff // Maximum the gas limit (2^63-1).
+	GenesisGasLimit      uint64 = 4712388            // Gas limit of the Genesis block.
 
+	// Note: MaximumExtraDataSize has been reduced to 32 in Geth, but is kept the same in Coreth for
+	// backwards compatibility.
 	MaximumExtraDataSize  uint64 = 64    // Maximum size extra data may be after Genesis.
 	ExpByteGas            uint64 = 10    // Times ceil(log256(exponent)) for the EXP instruction.
 	SloadGas              uint64 = 50    // Multiplied by the number of 32-byte words that are copied (round up) for any *COPY operation and added.
@@ -35,10 +52,11 @@ const (
 	LogDataGas            uint64 = 8     // Per byte in a LOG* operation's data.
 	CallStipend           uint64 = 2300  // Free gas given at beginning of call.
 
-	Sha3Gas     uint64 = 30 // Once per SHA3 operation.
-	Sha3WordGas uint64 = 6  // Once per word of the SHA3 operation's data.
+	Keccak256Gas     uint64 = 30 // Once per KECCAK256 operation.
+	Keccak256WordGas uint64 = 6  // Once per word of the KECCAK256 operation's data.
+	InitCodeWordGas  uint64 = 2  // Once per word of the init code when creating a contract.
 
-	SstoreSetGas    uint64 = 20000 // Once per SLOAD operation.
+	SstoreSetGas    uint64 = 20000 // Once per SSTORE operation.
 	SstoreResetGas  uint64 = 5000  // Once per SSTORE operation if the zeroness changes from zero.
 	SstoreClearGas  uint64 = 5000  // Once per SSTORE operation if the zeroness doesn't change.
 	SstoreRefundGas uint64 = 15000 // Once per SSTORE operation if the zeroness changes to zero.
@@ -52,33 +70,41 @@ const (
 	NetSstoreResetRefund      uint64 = 4800  // Once per SSTORE operation for resetting to the original non-zero value
 	NetSstoreResetClearRefund uint64 = 19800 // Once per SSTORE operation for resetting to the original zero value
 
-	SstoreSentryGasEIP2200   uint64 = 2300  // Minimum gas required to be present for an SSTORE call, not consumed
-	SstoreNoopGasEIP2200     uint64 = 800   // Once per SSTORE operation if the value doesn't change.
-	SstoreDirtyGasEIP2200    uint64 = 800   // Once per SSTORE operation if a dirty value is changed.
-	SstoreInitGasEIP2200     uint64 = 20000 // Once per SSTORE operation from clean zero to non-zero
-	SstoreInitRefundEIP2200  uint64 = 19200 // Once per SSTORE operation for resetting to the original zero value
-	SstoreCleanGasEIP2200    uint64 = 5000  // Once per SSTORE operation from clean non-zero to something else
-	SstoreCleanRefundEIP2200 uint64 = 4200  // Once per SSTORE operation for resetting to the original non-zero value
-	SstoreClearRefundEIP2200 uint64 = 15000 // Once per SSTORE operation for clearing an originally existing storage slot
+	SstoreSentryGasEIP2200            uint64 = 2300  // Minimum gas required to be present for an SSTORE call, not consumed
+	SstoreSetGasEIP2200               uint64 = 20000 // Once per SSTORE operation from clean zero to non-zero
+	SstoreResetGasEIP2200             uint64 = 5000  // Once per SSTORE operation from clean non-zero to something else
+	SstoreClearsScheduleRefundEIP2200 uint64 = 15000 // Once per SSTORE operation for clearing an originally existing storage slot
 
-	JumpdestGas uint64 = 1 // Once per JUMPDEST operation.
-	//EMCGas        uint64 = 1     // Once per EMC operation.
+	ColdAccountAccessCostEIP2929 = uint64(2600) // COLD_ACCOUNT_ACCESS_COST
+	ColdSloadCostEIP2929         = uint64(2100) // COLD_SLOAD_COST
+	WarmStorageReadCostEIP2929   = uint64(100)  // WARM_STORAGE_READ_COST
+
+	// In EIP-2200: SstoreResetGas was 5000.
+	// In EIP-2929: SstoreResetGas was changed to '5000 - COLD_SLOAD_COST'.
+	// In EIP-3529: SSTORE_CLEARS_SCHEDULE is defined as SSTORE_RESET_GAS + ACCESS_LIST_STORAGE_KEY_COST
+	// Which becomes: 5000 - 2100 + 1900 = 4800
+	SstoreClearsScheduleRefundEIP3529 uint64 = SstoreResetGasEIP2200 - ColdSloadCostEIP2929 + TxAccessListStorageKeyGas
+
+	JumpdestGas   uint64 = 1     // Once per JUMPDEST operation.
 	EpochDuration uint64 = 30000 // Duration between proof-of-work epochs.
 
-	CreateDataGas            uint64 = 200   //
-	CallCreateDepth          uint64 = 1024  // Maximum depth of call/create stack.
-	ExpGas                   uint64 = 10    // Once per EXP instruction
-	LogGas                   uint64 = 375   // Per LOG* operation.
-	CopyGas                  uint64 = 3     //
-	StackLimit               uint64 = 1024  // Maximum size of VM stack allowed.
-	TierStepGas              uint64 = 0     // Once per operation, for a selection of them.
-	LogTopicGas              uint64 = 375   // Multiplied by the * of the LOG*, per LOG transaction. e.g. LOG0 incurs 0 * c_txLogTopicGas, LOG4 incurs 4 * c_txLogTopicGas.
-	CreateGas                uint64 = 32000 // Once per CREATE operation & contract-creation transaction.
-	Create2Gas               uint64 = 32000 // Once per CREATE2 operation
-	SelfdestructRefundGas    uint64 = 24000 // Refunded following a selfdestruct operation.
-	MemoryGas                uint64 = 3     // Times the address of the (highest referenced byte in memory + 1). NOTE: referencing happens on read, write and in instructions such as RETURN and CALL.
-	TxDataNonZeroGasFrontier uint64 = 68    // Per byte of data attached to a transaction that is not equal to zero. NOTE: Not payable on data of calls between transactions.
-	TxDataNonZeroGasEIP2028  uint64 = 16    // Per byte of non zero data attached to a transaction after EIP 2028 (part in Istanbul)
+	CreateDataGas         uint64 = 200   //
+	CallCreateDepth       uint64 = 1024  // Maximum depth of call/create stack.
+	ExpGas                uint64 = 10    // Once per EXP instruction
+	LogGas                uint64 = 375   // Per LOG* operation.
+	CopyGas               uint64 = 3     //
+	StackLimit            uint64 = 1024  // Maximum size of VM stack allowed.
+	TierStepGas           uint64 = 0     // Once per operation, for a selection of them.
+	LogTopicGas           uint64 = 375   // Multiplied by the * of the LOG*, per LOG transaction. e.g. LOG0 incurs 0 * c_txLogTopicGas, LOG4 incurs 4 * c_txLogTopicGas.
+	CreateGas             uint64 = 32000 // Once per CREATE operation & contract-creation transaction.
+	Create2Gas            uint64 = 32000 // Once per CREATE2 operation
+	SelfdestructRefundGas uint64 = 24000 // Refunded following a selfdestruct operation.
+	MemoryGas             uint64 = 3     // Times the address of the (highest referenced byte in memory + 1). NOTE: referencing happens on read, write and in instructions such as RETURN and CALL.
+
+	TxDataNonZeroGasFrontier  uint64 = 68   // Per byte of data attached to a transaction that is not equal to zero. NOTE: Not payable on data of calls between transactions.
+	TxDataNonZeroGasEIP2028   uint64 = 16   // Per byte of non zero data attached to a transaction after EIP 2028 (part in Istanbul)
+	TxAccessListAddressGas    uint64 = 2400 // Per address specified in EIP 2930 access list
+	TxAccessListStorageKeyGas uint64 = 1900 // Per storage key specified in EIP 2930 access list
 
 	// These have been changed during the course of the chain
 	CallGasFrontier              uint64 = 40  // Once per CALL operation & message call transaction.
@@ -110,7 +136,8 @@ const (
 	// Introduced in Tangerine Whistle (Eip 150)
 	CreateBySelfdestructGas uint64 = 25000
 
-	MaxCodeSize = 24576 // Maximum bytecode to permit for a contract
+	MaxCodeSize     = 24576           // Maximum bytecode to permit for a contract
+	MaxInitCodeSize = 2 * MaxCodeSize // Maximum initcode to permit in a creation transaction and create instructions
 
 	// Precompiled contract gas prices
 
@@ -121,7 +148,6 @@ const (
 	Ripemd160PerWordGas uint64 = 120  // Per-word price for a RIPEMD160 operation
 	IdentityBaseGas     uint64 = 15   // Base price for a data copy operation
 	IdentityPerWordGas  uint64 = 3    // Per-work price for a data copy operation
-	ModExpQuadCoeffDiv  uint64 = 20   // Divisor for the quadratic particle of the big int modular exponentiation
 
 	Bn256AddGasByzantium             uint64 = 500    // Byzantium gas needed for an elliptic curve addition
 	Bn256AddGasIstanbul              uint64 = 150    // Gas needed for an elliptic curve addition
@@ -140,6 +166,33 @@ const (
 	Bls12381PairingPerPairGas uint64 = 23000  // Per-point pair gas price for BLS12-381 elliptic curve pairing check
 	Bls12381MapG1Gas          uint64 = 5500   // Gas price for BLS12-381 mapping field element to G1 operation
 	Bls12381MapG2Gas          uint64 = 110000 // Gas price for BLS12-381 mapping field element to G2 operation
+
+	// The Refund Quotient is the cap on how much of the used gas can be refunded. Before EIP-3529,
+	// up to half the consumed gas could be refunded. Redefined as 1/5th in EIP-3529
+	RefundQuotient        uint64 = 2
+	RefundQuotientEIP3529 uint64 = 5
+
+	BlobTxBytesPerFieldElement         = 32      // Size in bytes of a field element
+	BlobTxFieldElementsPerBlob         = 4096    // Number of field elements stored in a single data blob
+	BlobTxHashVersion                  = 0x01    // Version byte of the commitment hash
+	BlobTxBlobGasPerBlob               = 1 << 17 // Gas consumption of a single data blob (== blob byte size)
+	BlobTxMinBlobGasprice              = 1       // Minimum gas price for data blobs
+	BlobTxBlobGaspriceUpdateFraction   = 3338477 // Controls the maximum rate of change for blob gas price
+	BlobTxPointEvaluationPrecompileGas = 50000   // Gas price for the point evaluation precompile.
+
+	BlobTxTargetBlobGasPerBlock = 3 * BlobTxBlobGasPerBlob // Target consumable blob gas for data blobs per block (for 1559-like pricing)
+	MaxBlobGasPerBlock          = 6 * BlobTxBlobGasPerBlob // Maximum consumable blob gas for data blobs per block
+)
+
+const (
+	// Avalanche Stateful Precompile Params
+	// Gas price for native asset balance lookup. Based on the cost of an SLOAD operation since native
+	// asset balances are kept in state storage.
+	AssetBalanceApricot uint64 = 2100
+	// Gas price for native asset call. This gas price reflects the additional work done for the native
+	// asset transfer itself, which is a write to state storage. The cost of creating a new account and
+	// normal value transfer is assessed separately from this cost.
+	AssetCallApricot uint64 = 20000
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
@@ -151,7 +204,8 @@ var (
 	MinimumDifficulty      = big.NewInt(131072) // The minimum that the difficulty may ever be.
 	DurationLimit          = big.NewInt(13)     // The decision boundary on the blocktime duration used to determine whether difficulty should go up or not.
 
-	// MinGasPrice is the number of nAVAX required per gas unit for a transaction
-	// to be valid, measured in wei
-	MinGasPrice = big.NewInt(470 * GWei)
+	// BeaconRootsStorageAddress is the address where historical beacon roots are stored as per EIP-4788
+	BeaconRootsStorageAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")
+	// SystemAddress is where the system-transaction is sent from as per EIP-4788
+	SystemAddress common.Address = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
 )

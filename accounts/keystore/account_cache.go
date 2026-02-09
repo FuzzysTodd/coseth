@@ -1,3 +1,13 @@
+// (c) 2019-2020, Ava Labs, Inc.
+//
+// This file is a derived work, based on the go-ethereum library whose original
+// notices appear below.
+//
+// It is distributed under a license compatible with the licensing terms of the
+// original code from which it is derived.
+//
+// Much love to the original authors for their work.
+// **********
 // Copyright 2017 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -28,9 +38,10 @@ import (
 	"time"
 
 	"github.com/ava-labs/coreth/accounts"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
-	mapset "github.com/deckarep/golang-set"
+	"golang.org/x/exp/slices"
 )
 
 // Minimum amount of time between cache reloads. This limit applies if the platform does
@@ -38,11 +49,10 @@ import (
 // exist yet, the code will attempt to create a watcher at most this often.
 const minReloadInterval = 2 * time.Second
 
-type accountsByURL []accounts.Account
-
-func (s accountsByURL) Len() int           { return len(s) }
-func (s accountsByURL) Less(i, j int) bool { return s[i].URL.Cmp(s[j].URL) < 0 }
-func (s accountsByURL) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+// byURL defines the sorting order for accounts.
+func byURL(a, b accounts.Account) int {
+	return a.URL.Cmp(b.URL)
+}
 
 // AmbiguousAddrError is returned when attempting to unlock
 // an address for which more than one file exists.
@@ -67,7 +77,7 @@ type accountCache struct {
 	keydir   string
 	watcher  *watcher
 	mu       sync.Mutex
-	all      accountsByURL
+	all      []accounts.Account
 	byAddr   map[common.Address][]accounts.Account
 	throttle *time.Timer
 	notify   chan struct{}
@@ -79,7 +89,7 @@ func newAccountCache(keydir string) (*accountCache, chan struct{}) {
 		keydir: keydir,
 		byAddr: make(map[common.Address][]accounts.Account),
 		notify: make(chan struct{}, 1),
-		fileC:  fileCache{all: mapset.NewThreadUnsafeSet()},
+		fileC:  fileCache{all: mapset.NewThreadUnsafeSet[string]()},
 	}
 	ac.watcher = newWatcher(ac)
 	return ac, ac.notify
@@ -146,6 +156,14 @@ func (ac *accountCache) deleteByFile(path string) {
 	}
 }
 
+// watcherStarted returns true if the watcher loop started running (even if it
+// has since also ended).
+func (ac *accountCache) watcherStarted() bool {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+	return ac.watcher.running || ac.watcher.runEnded
+}
+
 func removeAccount(slice []accounts.Account, elem accounts.Account) []accounts.Account {
 	for i := range slice {
 		if slice[i] == elem {
@@ -186,7 +204,7 @@ func (ac *accountCache) find(a accounts.Account) (accounts.Account, error) {
 	default:
 		err := &AmbiguousAddrError{Addr: a.Address, Matches: make([]accounts.Account, len(matches))}
 		copy(err.Matches, matches)
-		sort.Sort(accountsByURL(err.Matches))
+		slices.SortFunc(err.Matches, byURL)
 		return accounts.Account{}, err
 	}
 }
@@ -262,7 +280,7 @@ func (ac *accountCache) scanAccounts() error {
 		switch {
 		case err != nil:
 			log.Debug("Failed to decode keystore key", "path", path, "err", err)
-		case (addr == common.Address{}):
+		case addr == common.Address{}:
 			log.Debug("Failed to decode keystore key", "path", path, "err", "missing or zero address")
 		default:
 			return &accounts.Account{
@@ -275,16 +293,15 @@ func (ac *accountCache) scanAccounts() error {
 	// Process all the file diffs
 	start := time.Now()
 
-	for _, p := range creates.ToSlice() {
-		if a := readAccount(p.(string)); a != nil {
+	for _, path := range creates.ToSlice() {
+		if a := readAccount(path); a != nil {
 			ac.add(*a)
 		}
 	}
-	for _, p := range deletes.ToSlice() {
-		ac.deleteByFile(p.(string))
+	for _, path := range deletes.ToSlice() {
+		ac.deleteByFile(path)
 	}
-	for _, p := range updates.ToSlice() {
-		path := p.(string)
+	for _, path := range updates.ToSlice() {
 		ac.deleteByFile(path)
 		if a := readAccount(path); a != nil {
 			ac.add(*a)
