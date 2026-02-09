@@ -3,10 +3,8 @@ module github.com/ava-labs/coreth
 go 1.21.10
 
 require (
-	github.com/VictoriaMetrics/fastcache v1.12.1
-	github.com/ava-labs/avalanchego v1.11.6
-	github.com/cespare/cp v0.1.0
-	github.com/crate-crypto/go-ipa v0.0.0-20231025140028-3c0104f4b233
+	github.com/VictoriaMetrics/fastcache v1.5.7
+	github.com/ava-labs/avalanchego v1.0.3-rc.2
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set/v2 v2.1.0
 	github.com/dop251/goja v0.0.0-20230806174421-c933cf95e127

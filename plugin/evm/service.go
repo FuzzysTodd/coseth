@@ -139,6 +139,11 @@ type ImportKeyArgs struct {
 
 // ImportKey adds a private key to the provided user
 func (service *AvaxAPI) ImportKey(r *http.Request, args *ImportKeyArgs, reply *api.JSONAddress) error {
+	log.Info(fmt.Sprintf("EVM: ImportKey called for user '%s'", args.Username))
+
+	if !strings.HasPrefix(args.PrivateKey, constants.SecretKeyPrefix) {
+		return fmt.Errorf("private key missing %s prefix", constants.SecretKeyPrefix)
+	}
 	log.Info("EVM: ImportKey called", "username", args.Username)
 
 	if args.PrivateKey == nil {
