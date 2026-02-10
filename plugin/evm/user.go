@@ -17,8 +17,9 @@ import (
 var addressesKey = ids.Empty[:]
 
 var (
-	errDBNil  = errors.New("db uninitialized")
-	errKeyNil = errors.New("key uninitialized")
+	errDBNil        = errors.New("db uninitialized")
+	errKeyNil       = errors.New("key uninitialized")
+	errEmptyAddress = errors.New("address is empty")
 )
 
 type user struct {
@@ -57,8 +58,8 @@ func (u *user) getAddresses() ([]common.Address, error) {
 func (u *user) controlsAddress(address common.Address) (bool, error) {
 	if u.db == nil {
 		return false, errDBNil
-		//} else if address.IsZero() {
-		//	return false, errEmptyAddress
+	} else if address.IsZero() {
+		return false, errEmptyAddress
 	}
 	return u.db.Has(address.Bytes())
 }
@@ -107,8 +108,8 @@ func (u *user) putAddress(privKey *secp256k1.PrivateKey) error {
 func (u *user) getKey(address common.Address) (*secp256k1.PrivateKey, error) {
 	if u.db == nil {
 		return nil, errDBNil
-		//} else if address.IsZero() {
-		//	return nil, errEmptyAddress
+	} else if address.IsZero() {
+		return nil, errEmptyAddress
 	}
 
 	bytes, err := u.db.Get(address.Bytes())
